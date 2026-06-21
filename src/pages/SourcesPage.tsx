@@ -33,8 +33,8 @@ export const SourcesPage: React.FC = () => {
   }>({
     name: '',
     url: '',
-    type: 'mixed',
-    apiType: 'custom',
+    type: 'video',
+    apiType: 'catvod',
   })
   const [loading, setLoading] = useState(false)
 
@@ -144,7 +144,7 @@ export const SourcesPage: React.FC = () => {
 
       setAddModalOpen(false)
       setEditSource(null)
-      setFormData({ name: '', url: '', type: 'mixed', apiType: 'custom' })
+      setFormData({ name: '', url: '', type: 'video', apiType: 'catvod' })
     } catch (error) {
       showToast(`操作失败: ${(error as Error).message}`, 'error')
     } finally {
@@ -169,7 +169,7 @@ export const SourcesPage: React.FC = () => {
         <h1 className="text-2xl font-bold text-black dark:text-white">数据源管理</h1>
         <Button icon={<Plus size={18} />} onClick={() => {
           setEditSource(null)
-          setFormData({ name: '', url: '', type: 'mixed', apiType: 'custom' })
+          setFormData({ name: '', url: '', type: 'video', apiType: 'catvod' })
           setAddModalOpen(true)
         }}>
           添加数据源
@@ -372,7 +372,7 @@ export const SourcesPage: React.FC = () => {
                     ...formData,
                     name: 'CatVod演示源',
                     url: 'https://gh-proxy.org/https://raw.githubusercontent.com/ggrrttyyiii/CatVodSpider/refs/heads/main/json/demo.json',
-                    type: 'mixed',
+                    type: 'video',
                     apiType: 'catvod',
                   })}
                   className="block w-full text-left text-blue-600 dark:text-blue-400 hover:underline truncate"

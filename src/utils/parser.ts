@@ -1,6 +1,22 @@
 import type { Source, BookSource, IptvChannel, LiveChannel } from '@/types'
 import { safeJSONParse, generateId } from '.'
 
+function resolveSiteUrl(site: any, parentUrl: string): string {
+  const api = site.api || site.url
+  if (api && typeof api === 'string' && api.startsWith('http')) return api
+  return parentUrl
+}
+
+function parseSourceHeader(header: any): Record<string, string> | undefined {
+  if (!header) return undefined
+  if (typeof header === 'object') return header
+  if (typeof header === 'string') {
+    const parsed = safeJSONParse<Record<string, string>>(header)
+    return parsed || undefined
+  }
+  return undefined
+}
+
 export function parseCatVodSource(url: string, content: string): Source[] {
   const data = safeJSONParse(content)
   if (!data) return []
@@ -9,18 +25,20 @@ export function parseCatVodSource(url: string, content: string): Source[] {
 
   if (data.sites && Array.isArray(data.sites)) {
     data.sites.forEach((site: any) => {
-      const type = site.type === 0 ? 'video' : site.type === 1 ? 'novel' : 'mixed'
+      const siteType = site.type === 1 ? 'novel' as const : 'video' as const
+      const siteUrl = resolveSiteUrl(site, url)
+
       sources.push({
         id: generateId('src_'),
         name: site.name || '未知源',
-        type,
-        url: url,
-        enabled: site.enable !== false,
+        type: siteType,
+        url: siteUrl,
+        enabled: site.enable !== false && site.searchable !== 0,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         config: {
           apiType: 'catvod',
-          headers: data.header,
+          headers: parseSourceHeader(site.header || data.header),
         },
       })
     })
@@ -37,17 +55,19 @@ export function parseTvBoxSource(url: string, content: string): Source[] {
 
   if (data.sites && Array.isArray(data.sites)) {
     data.sites.forEach((site: any) => {
+      const siteUrl = resolveSiteUrl(site, url)
+
       sources.push({
         id: generateId('src_'),
         name: site.name || '未知源',
         type: 'video',
-        url: url,
-        enabled: site.enable !== false,
+        url: siteUrl,
+        enabled: site.enable !== false && site.searchable !== 0,
         createdAt: Date.now(),
         updatedAt: Date.now(),
         config: {
           apiType: 'tvbox',
-          headers: data.header,
+          headers: parseSourceHeader(site.header || data.header),
         },
       })
     })

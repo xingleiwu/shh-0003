@@ -71,7 +71,7 @@ function buildApiUrl(baseUrl: string, params: Record<string, any>): string {
 
 export async function catvodGetCategories(source: Source): Promise<CatVodCategory[]> {
   try {
-    const url = buildApiUrl(source.url, { ...source.config?.params, do: 'cate' })
+    const url = buildApiUrl(source.url, { ac: 'list' })
     const data = await fetchJson(url, source.config?.headers)
     if (data.class && Array.isArray(data.class)) {
       return data.class
@@ -94,7 +94,7 @@ export async function catvodGetHomeContent(source: Source): Promise<{
   list: any[]
 }> {
   try {
-    const url = buildApiUrl(source.url, { ...source.config?.params, do: 'home' })
+    const url = buildApiUrl(source.url, { ac: 'detail', pg: 1 })
     const data = await fetchJson(url, source.config?.headers)
 
     let categories: CatVodCategory[] = []
@@ -140,8 +140,7 @@ export async function catvodGetCategoryContent(
 }> {
   try {
     const url = buildApiUrl(source.url, {
-      ...source.config?.params,
-      do: 'category',
+      ac: 'detail',
       t: categoryId,
       pg: page,
       ...extend,
@@ -166,8 +165,7 @@ export async function catvodGetVideoDetail(
 ): Promise<CatVodVideoDetail | null> {
   try {
     const url = buildApiUrl(source.url, {
-      ...source.config?.params,
-      do: 'detail',
+      ac: 'detail',
       ids: vodId,
     })
     const data = await fetchJson(url, source.config?.headers)
@@ -187,8 +185,7 @@ export async function catvodGetPlayUrl(
 ): Promise<{ url: string | null; parse?: number }> {
   try {
     const url = buildApiUrl(source.url, {
-      ...source.config?.params,
-      do: 'play',
+      ac: 'play',
       flag: playFlag,
       id: playUrl,
     })
@@ -209,22 +206,10 @@ export async function catvodSearch(
   page: number = 1
 ): Promise<CatVodVideo[]> {
   try {
-    const searchUrl = source.config?.searchUrl || source.url
-    const params: Record<string, any> = {
-      ...source.config?.params,
-      do: 'search',
+    const url = buildApiUrl(source.url, {
       wd: keyword,
       pg: page,
-    }
-    let url: string
-    if (searchUrl.includes('search.php')) {
-      url = `${searchUrl}?wd=${encodeURIComponent(keyword)}&pg=${page}`
-    } else if (searchUrl.includes('?')) {
-      url = `${searchUrl}&${Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&')}`
-    } else {
-      url = `${searchUrl}?${Object.entries(params).map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&')}`
-    }
-
+    })
     const data = await fetchJson(url, source.config?.headers)
     const list = Array.isArray(data.list) ? data.list : data.data?.list || []
     return list
@@ -240,8 +225,7 @@ export async function catvodGetBookDetail(
 ): Promise<{ book: CatVodBook | null; chapters: CatVodChapter[] }> {
   try {
     const url = buildApiUrl(source.url, {
-      ...source.config?.params,
-      do: 'detail',
+      ac: 'detail',
       ids: bookId,
     })
     const data = await fetchJson(url, source.config?.headers)
@@ -285,8 +269,7 @@ export async function catvodGetChapterContent(
 ): Promise<string> {
   try {
     const url = buildApiUrl(source.url, {
-      ...source.config?.params,
-      do: 'play',
+      ac: 'play',
       flag: '章节',
       id: chapterId,
     })

@@ -58,7 +58,10 @@ export const BooksPage: React.FC = () => {
   const [hasMoreCategory, setHasMoreCategory] = useState(true)
   const [discoverMode, setDiscoverMode] = useState<'home' | 'category' | 'search'>('home')
 
-  const novelSources = sources.filter(s => s.type === 'novel' || s.type === 'mixed')
+  const novelSources = sources.filter(s =>
+    (s.type === 'novel' || s.type === 'mixed') &&
+    (s.config?.apiType === 'catvod' || s.config?.apiType === 'yuedu' || !s.config?.apiType)
+  )
   const enabledNovelSources = novelSources.filter(s => s.enabled)
 
   const filteredBooks = books.filter(book =>
