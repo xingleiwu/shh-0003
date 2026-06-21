@@ -60,7 +60,12 @@ export interface CatVodBook {
 }
 
 function buildApiUrl(baseUrl: string, params: Record<string, any>): string {
-  const url = baseUrl.replace(/\/$/, '')
+  let url = baseUrl.replace(/\/$/, '')
+  if (!url.includes('/api.php') && !url.includes('/api/') && !url.includes('/provide') && !url.includes('ac=')) {
+    if (!url.endsWith('/')) {
+      url = url + '/api.php/provide/vod/'
+    }
+  }
   const query = Object.entries(params)
     .filter(([, v]) => v !== undefined && v !== null && v !== '')
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
@@ -127,9 +132,20 @@ function normalizePageInfo(data: any, page: number): { page: number; pagecount: 
 
 export async function catvodGetCategories(source: Source): Promise<CatVodCategory[]> {
   try {
-    const url = buildApiUrl(source.url, { ac: 'list' })
-    const data = await fetchJson(url, source.config?.headers)
-    return normalizeClass(data)
+    const urls = [
+      buildApiUrl(source.url, { ac: 'list' }),
+      buildApiUrl(source.url, { ac: 'type' }),
+    ]
+    for (const url of urls) {
+      try {
+        const data = await fetchJson(url, source.config?.headers)
+        const cats = normalizeClass(data)
+        if (cats.length > 0) return cats
+      } catch {
+        continue
+      }
+    }
+    return []
   } catch (error) {
     console.error(`获取分类失败 [${source.name}]:`, error)
     return []
@@ -143,8 +159,23 @@ export async function catvodGetHomeContent(source: Source): Promise<{
   list: any[]
 }> {
   try {
-    const url = buildApiUrl(source.url, { ac: 'list', pg: 1 })
-    const data = await fetchJson(url, source.config?.headers)
+    let data: any = null
+    const tryUrls = [
+      buildApiUrl(source.url, { ac: 'list', pg: 1 }),
+      buildApiUrl(source.url, { ac: 'detail', pg: 1 }),
+    ]
+    for (const url of tryUrls) {
+      try {
+        data = await fetchJson(url, source.config?.headers)
+        const list = normalizeList(data)
+        if (list.length > 0) break
+      } catch {
+        continue
+      }
+    }
+    if (!data) {
+      return { categories: [], videos: [], books: [], list: [] }
+    }
 
     const categories = normalizeClass(data)
     const list = normalizeList(data)
@@ -188,19 +219,23 @@ export async function catvodGetCategoryContent(
   list: CatVodVideo[]
 }> {
   try {
-    const url = buildApiUrl(source.url, {
-      ac: 'list',
-      t: categoryId,
-      pg: page,
-      ...extend,
-    })
-    const data = await fetchJson(url, source.config?.headers)
-    const list = normalizeList(data)
-    const pageInfo = normalizePageInfo(data, page)
-    return {
-      ...pageInfo,
-      list,
+    const urls = [
+      buildApiUrl(source.url, { ac: 'list', t: categoryId, pg: page, ...extend }),
+      buildApiUrl(source.url, { ac: 'detail', t: categoryId, pg: page, ...extend }),
+    ]
+    for (const url of urls) {
+      try {
+        const data = await fetchJson(url, source.config?.headers)
+        const list = normalizeList(data)
+        if (list.length > 0) {
+          const pageInfo = normalizePageInfo(data, page)
+          return { ...pageInfo, list }
+        }
+      } catch {
+        continue
+      }
     }
+    return { page, pagecount: 1, total: 0, limit: 20, list: [] }
   } catch (error) {
     console.error(`获取分类内容失败 [${source.name}]:`, error)
     return { page, pagecount: 1, total: 0, limit: 20, list: [] }

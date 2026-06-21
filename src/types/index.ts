@@ -16,6 +16,9 @@ export interface SourceConfig {
   playUrl?: string
   headers?: Record<string, string>
   params?: Record<string, any>
+  isSpider?: boolean
+  spiderName?: string
+  ext?: string
 }
 
 export interface Book {

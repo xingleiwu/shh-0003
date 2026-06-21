@@ -82,7 +82,7 @@ export const BooksPage: React.FC = () => {
 
   const novelSources = sources.filter(s =>
     (s.type === 'novel' || s.type === 'mixed') &&
-    (s.config?.apiType === 'catvod' || s.config?.apiType === 'yuedu' || s.config?.apiType === 'custom' || !s.config?.apiType)
+    (s.config?.apiType === 'catvod' || s.config?.apiType === 'tvbox' || s.config?.apiType === 'yuedu' || s.config?.apiType === 'custom' || !s.config?.apiType)
   )
   const enabledNovelSources = novelSources.filter(s => s.enabled !== false)
 

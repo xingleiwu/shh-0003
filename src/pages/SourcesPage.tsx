@@ -126,7 +126,10 @@ export const SourcesPage: React.FC = () => {
 
         if (result.sources.length > 0) {
           importSources(result.sources)
-          showToast(`成功导入 ${result.sources.length} 个数据源`, 'success')
+          if (result.liveChannels.length > 0) {
+            result.liveChannels.forEach(channel => addLiveChannel(channel))
+          }
+          showToast(`成功导入 ${result.sources.length} 个数据源${result.liveChannels.length > 0 ? `，${result.liveChannels.length} 个直播频道` : ''}`, 'success')
         } else if (result.liveChannels.length > 0) {
           result.liveChannels.forEach(channel => addLiveChannel(channel))
           showToast(`成功导入 ${result.liveChannels.length} 个直播频道`, 'success')

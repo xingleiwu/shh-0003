@@ -1,9 +1,73 @@
 import type { Source, BookSource, IptvChannel, LiveChannel } from '@/types'
 import { safeJSONParse, generateId } from '.'
 
+function isSpiderApi(api: string): boolean {
+  if (!api || typeof api !== 'string') return false
+  return api.startsWith('csp_') ||
+    api.startsWith('js_') ||
+    api.endsWith('.Spider') ||
+    api.endsWith('.spider') ||
+    api.startsWith('XBPQ_') ||
+    api.startsWith('xbpq_') ||
+    (!api.startsWith('http') && !api.startsWith('/') && /^[a-zA-Z]/.test(api) && !api.includes('.'))
+}
+
+function extractUrlFromExt(ext: any): string | null {
+  if (!ext) return null
+  if (typeof ext === 'string') {
+    if (ext.startsWith('http://') || ext.startsWith('https://')) return ext
+    try {
+      const parsed = JSON.parse(ext)
+      return extractUrlFromExtObj(parsed)
+    } catch {
+      return null
+    }
+  }
+  if (typeof ext === 'object') return extractUrlFromExtObj(ext)
+  return null
+}
+
+function extractUrlFromExtObj(obj: any): string | null {
+  if (!obj || typeof obj !== 'object') return null
+  for (const key of ['url', 'api', 'siteUrl', 'site_url', 'apiUrl', 'api_url', 'host', 'baseUrl', 'base_url']) {
+    const val = obj[key]
+    if (typeof val === 'string' && (val.startsWith('http://') || val.startsWith('https://'))) return val
+  }
+  return null
+}
+
 function resolveSiteUrl(site: any, parentUrl: string): string {
-  const api = site.api || site.url
-  if (api && typeof api === 'string' && api.startsWith('http')) return api
+  const api = site.api
+  const siteUrl = site.url
+
+  if (api && typeof api === 'string' && (api.startsWith('http://') || api.startsWith('https://'))) {
+    return api
+  }
+
+  if (api && typeof api === 'string' && api.startsWith('/')) {
+    const baseStr = (siteUrl && typeof siteUrl === 'string' && siteUrl.startsWith('http')) ? siteUrl : parentUrl
+    try {
+      const base = new URL(baseStr)
+      return base.origin + api
+    } catch {
+      return baseStr.replace(/\/$/, '') + api
+    }
+  }
+
+  if (api && typeof api === 'string' && isSpiderApi(api)) {
+    const extUrl = extractUrlFromExt(site.ext)
+    if (extUrl) return extUrl
+    if (siteUrl && typeof siteUrl === 'string' && siteUrl.startsWith('http')) return siteUrl
+    return parentUrl
+  }
+
+  if (siteUrl && typeof siteUrl === 'string' && siteUrl.startsWith('http')) {
+    return siteUrl
+  }
+
+  const extUrl = extractUrlFromExt(site.ext)
+  if (extUrl) return extUrl
+
   return parentUrl
 }
 
@@ -17,63 +81,104 @@ function parseSourceHeader(header: any): Record<string, string> | undefined {
   return undefined
 }
 
-export function parseCatVodSource(url: string, content: string): Source[] {
+export function parseCatVodSource(url: string, content: string): { sources: Source[], liveChannels: LiveChannel[] } {
   const data = safeJSONParse(content)
-  if (!data) return []
+  if (!data) return { sources: [], liveChannels: [] }
 
   const sources: Source[] = []
+  const liveChannels: LiveChannel[] = []
 
   if (data.sites && Array.isArray(data.sites)) {
     data.sites.forEach((site: any) => {
+      if (site.type === 1) return
       const siteType = site.type === 1 ? 'novel' as const : 'video' as const
       const siteUrl = resolveSiteUrl(site, url)
+      const isSpider = site.api && typeof site.api === 'string' && isSpiderApi(site.api)
 
       sources.push({
         id: generateId('src_'),
         name: site.name || '未知源',
         type: siteType,
         url: siteUrl,
-        enabled: site.enable !== false && site.searchable !== 0,
+        enabled: site.enable !== false && site.searchable !== 0 && !!siteUrl && siteUrl.startsWith('http'),
         createdAt: Date.now(),
         updatedAt: Date.now(),
         config: {
           apiType: 'catvod',
           headers: parseSourceHeader(site.header || data.header),
+          isSpider: isSpider || undefined,
+          spiderName: isSpider ? site.api : undefined,
+          ext: site.ext || undefined,
         },
       })
     })
   }
 
-  return sources
+  if (data.lives && Array.isArray(data.lives)) {
+    data.lives.forEach((live: any) => {
+      if (live.url && typeof live.url === 'string' && live.url.startsWith('http')) {
+        liveChannels.push({
+          id: generateId('live_'),
+          name: live.name || '直播',
+          group: '直播源',
+          logo: live.logo || '',
+          urls: [live.url],
+          sourceId: 'catvod_live',
+        })
+      }
+    })
+  }
+
+  return { sources, liveChannels }
 }
 
-export function parseTvBoxSource(url: string, content: string): Source[] {
+export function parseTvBoxSource(url: string, content: string): { sources: Source[], liveChannels: LiveChannel[] } {
   const data = safeJSONParse(content)
-  if (!data) return []
+  if (!data) return { sources: [], liveChannels: [] }
 
   const sources: Source[] = []
+  const liveChannels: LiveChannel[] = []
 
   if (data.sites && Array.isArray(data.sites)) {
     data.sites.forEach((site: any) => {
       const siteUrl = resolveSiteUrl(site, url)
+      const isSpider = site.api && typeof site.api === 'string' && isSpiderApi(site.api)
 
       sources.push({
         id: generateId('src_'),
         name: site.name || '未知源',
         type: 'video',
         url: siteUrl,
-        enabled: site.enable !== false && site.searchable !== 0,
+        enabled: site.enable !== false && site.searchable !== 0 && !!siteUrl && siteUrl.startsWith('http'),
         createdAt: Date.now(),
         updatedAt: Date.now(),
         config: {
           apiType: 'tvbox',
           headers: parseSourceHeader(site.header || data.header),
+          isSpider: isSpider || undefined,
+          spiderName: isSpider ? site.api : undefined,
+          ext: site.ext || undefined,
         },
       })
     })
   }
 
-  return sources
+  if (data.lives && Array.isArray(data.lives)) {
+    data.lives.forEach((live: any) => {
+      if (live.url && typeof live.url === 'string' && live.url.startsWith('http')) {
+        liveChannels.push({
+          id: generateId('live_'),
+          name: live.name || '直播',
+          group: '直播源',
+          logo: live.logo || '',
+          urls: [live.url],
+          sourceId: 'tvbox_live',
+        })
+      }
+    })
+  }
+
+  return { sources, liveChannels }
 }
 
 export function parseYueduSource(content: string): Source[] {
@@ -258,12 +363,18 @@ export async function parseSourceContent(url: string, content: string): Promise<
   }
 
   switch (type) {
-    case 'catvod':
-      result.sources = parseCatVodSource(url, content)
+    case 'catvod': {
+      const parsed = parseCatVodSource(url, content)
+      result.sources = parsed.sources
+      result.liveChannels = parsed.liveChannels
       break
-    case 'tvbox':
-      result.sources = parseTvBoxSource(url, content)
+    }
+    case 'tvbox': {
+      const parsed = parseTvBoxSource(url, content)
+      result.sources = parsed.sources
+      result.liveChannels = parsed.liveChannels
       break
+    }
     case 'yuedu':
       result.sources = parseYueduSource(content)
       break
