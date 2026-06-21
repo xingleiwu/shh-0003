@@ -55,6 +55,16 @@ export interface CatVodBook {
   book_author?: string
   book_desc?: string
   book_remarks?: string
+  book_play_url?: string
+  book_play_from?: string
+  vod_play_url?: string
+  vod_play_from?: string
+  play_url?: string
+  play_from?: string
+  url?: string
+  chapter_list?: any[]
+  chapters?: any[]
+  toc?: any[]
   type_id?: string
   type_name?: string
 }
@@ -62,9 +72,7 @@ export interface CatVodBook {
 function buildApiUrl(baseUrl: string, params: Record<string, any>): string {
   let url = baseUrl.replace(/\/$/, '')
   if (!url.includes('/api.php') && !url.includes('/api/') && !url.includes('/provide') && !url.includes('ac=')) {
-    if (!url.endsWith('/')) {
-      url = url + '/api.php/provide/vod/'
-    }
+    url = url + '/api.php/provide/vod/'
   }
   const query = Object.entries(params)
     .filter(([, v]) => v !== undefined && v !== null && v !== '')
@@ -160,34 +168,30 @@ export async function catvodGetHomeContent(source: Source): Promise<{
 }> {
   try {
     let data: any = null
+    let list: any[] = []
     const tryUrls = [
-      buildApiUrl(source.url, { ac: 'list', pg: 1 }),
       buildApiUrl(source.url, { ac: 'detail', pg: 1 }),
+      buildApiUrl(source.url, { ac: 'list', pg: 1 }),
     ]
     for (const url of tryUrls) {
       try {
         data = await fetchJson(url, source.config?.headers)
-        const list = normalizeList(data)
+        list = normalizeList(data)
         if (list.length > 0) break
       } catch {
         continue
       }
     }
-    if (!data) {
+    if (!data || list.length === 0) {
       return { categories: [], videos: [], books: [], list: [] }
     }
 
     const categories = normalizeClass(data)
-    const list = normalizeList(data)
 
     const videosFromList = list.filter(
       (item: any) =>
-        item.vod_id ||
-        item.vod_name ||
-        item.id ||
-        item.name ||
-        source.type === 'video' ||
-        source.type === 'mixed'
+        item.vod_id || item.vod_name || item.id || item.name ||
+        source.type === 'video' || source.type === 'mixed'
     )
     const booksFromList = list.filter(
       (item: any) =>
@@ -196,8 +200,8 @@ export async function catvodGetHomeContent(source: Source): Promise<{
 
     return {
       categories,
-      videos: videosFromList.length > 0 ? videosFromList : [],
-      books: booksFromList.length > 0 ? booksFromList : [],
+      videos: videosFromList,
+      books: booksFromList,
       list,
     }
   } catch (error) {
@@ -220,8 +224,8 @@ export async function catvodGetCategoryContent(
 }> {
   try {
     const urls = [
-      buildApiUrl(source.url, { ac: 'list', t: categoryId, pg: page, ...extend }),
       buildApiUrl(source.url, { ac: 'detail', t: categoryId, pg: page, ...extend }),
+      buildApiUrl(source.url, { ac: 'list', t: categoryId, pg: page, ...extend }),
     ]
     for (const url of urls) {
       try {
@@ -247,10 +251,7 @@ export async function catvodGetVideoDetail(
   vodId: string
 ): Promise<CatVodVideoDetail | null> {
   try {
-    const url = buildApiUrl(source.url, {
-      ac: 'detail',
-      ids: vodId,
-    })
+    const url = buildApiUrl(source.url, { ac: 'detail', ids: vodId })
     const data = await fetchJson(url, source.config?.headers)
     const list = normalizeList(data)
     if (list.length > 0) return list[0]
@@ -267,19 +268,16 @@ export async function catvodGetPlayUrl(
   playUrl: string
 ): Promise<{ url: string | null; parse?: number }> {
   try {
-    const url = buildApiUrl(source.url, {
-      ac: 'play',
-      flag: playFlag,
-      id: playUrl,
-    })
-    const data = await fetchJson(url, source.config?.headers)
-    return {
-      url: data.url || data.data?.url || null,
-      parse: data.parse,
+    const apiUrl = buildApiUrl(source.url, { ac: 'play', flag: playFlag, id: playUrl })
+    const data = await fetchJson(apiUrl, source.config?.headers)
+    const resolvedUrl = data.url || data.data?.url || data.play_url || data.playUrl || null
+    if (resolvedUrl) {
+      return { url: resolveUrl(resolvedUrl, source.url), parse: data.parse }
     }
+    return { url: resolveUrl(playUrl, source.url), parse: 0 }
   } catch (error) {
     console.error(`解析播放地址失败 [${source.name}]:`, error)
-    return { url: playUrl, parse: 0 }
+    return { url: resolveUrl(playUrl, source.url), parse: 0 }
   }
 }
 
@@ -290,6 +288,7 @@ export async function catvodSearch(
 ): Promise<CatVodVideo[]> {
   try {
     const urls = [
+      buildApiUrl(source.url, { ac: 'detail', wd: keyword, pg: page }),
       buildApiUrl(source.url, { ac: 'list', wd: keyword, pg: page }),
       buildApiUrl(source.url, { wd: keyword, pg: page }),
     ]
@@ -301,7 +300,7 @@ export async function catvodSearch(
         if (list.length > 0) {
           return list
         }
-      } catch (e) {
+      } catch {
         continue
       }
     }
@@ -318,36 +317,44 @@ export async function catvodGetBookDetail(
   bookId: string
 ): Promise<{ book: CatVodBook | null; chapters: CatVodChapter[] }> {
   try {
-    const url = buildApiUrl(source.url, {
-      ac: 'detail',
-      ids: bookId,
-    })
+    const url = buildApiUrl(source.url, { ac: 'detail', ids: bookId })
     const data = await fetchJson(url, source.config?.headers)
     const list = normalizeList(data)
     if (list.length === 0) return { book: null, chapters: [] }
 
     const book: CatVodBook = list[0]
     let chapters: CatVodChapter[] = []
-    const playUrl = list[0].book_play_url || list[0].vod_play_url || list[0].url || ''
-    const playFrom = list[0].book_play_from || list[0].vod_play_from || '默认'
 
-    const sources = playFrom.split('$$$').filter(Boolean)
-    const urls = playUrl.split('$$$').filter(Boolean)
+    const playUrl = book.book_play_url || book.vod_play_url || book.play_url || book.url || ''
+    const playFrom = book.book_play_from || book.vod_play_from || book.play_from || '默认'
+    const chapterList = book.chapter_list || book.chapters || book.toc || null
 
-    if (sources.length > 0 && urls.length > 0) {
-      const firstSource = urls[0]
-      chapters = firstSource
-        .split('#')
-        .filter(Boolean)
-        .map((item: string, idx: number) => {
-          const [name, url] = item.split('$')
-          return {
-            chapter_id: `${bookId}_${idx}`,
-            chapter_name: name || `第${idx + 1}章`,
-            content: '',
-            book_id: bookId,
-          } as CatVodChapter
-        })
+    if (chapterList && Array.isArray(chapterList)) {
+      chapters = chapterList.map((ch: any, idx: number) => ({
+        chapter_id: ch.chapter_id || ch.id || `${bookId}_${idx}`,
+        chapter_name: ch.chapter_name || ch.name || ch.title || `第${idx + 1}章`,
+        content: ch.content || ch.url || '',
+        book_id: bookId,
+      }))
+    } else if (playUrl) {
+      const sources = playFrom.split('$$$').filter(Boolean)
+      const urls = playUrl.split('$$$').filter(Boolean)
+
+      if (urls.length > 0) {
+        const firstSource = urls[0]
+        chapters = firstSource
+          .split('#')
+          .filter(Boolean)
+          .map((item: string, idx: number) => {
+            const parts = item.split('$')
+            return {
+              chapter_id: `${bookId}_${idx}`,
+              chapter_name: parts[0] || `第${idx + 1}章`,
+              content: parts[1] || '',
+              book_id: bookId,
+            } as CatVodChapter
+          })
+      }
     }
 
     return { book, chapters }
@@ -359,16 +366,25 @@ export async function catvodGetBookDetail(
 
 export async function catvodGetChapterContent(
   source: Source,
-  chapterId: string
+  chapterId: string,
+  chapterUrl?: string
 ): Promise<string> {
+  if (chapterUrl && (chapterUrl.startsWith('http://') || chapterUrl.startsWith('https://'))) {
+    try {
+      const content = await fetchUrl(chapterUrl, source.config?.headers)
+      const parsed = safeJSONParse(content)
+      if (parsed) {
+        return parsed.content || parsed.data?.content || parsed.text || parsed.body || content
+      }
+      return content
+    } catch {
+      // fall through to API method
+    }
+  }
   try {
-    const url = buildApiUrl(source.url, {
-      ac: 'play',
-      flag: '章节',
-      id: chapterId,
-    })
+    const url = buildApiUrl(source.url, { ac: 'play', flag: '章节', id: chapterId })
     const data = await fetchJson(url, source.config?.headers)
-    const content = data.content || data.data?.content || data.url || ''
+    const content = data.content || data.data?.content || data.url || data.text || ''
     return typeof content === 'string' ? content : JSON.stringify(content)
   } catch (error) {
     console.error(`获取章节内容失败 [${source.name}]:`, error)
@@ -376,9 +392,12 @@ export async function catvodGetChapterContent(
   }
 }
 
-export function catvodParsePlayList(detail: CatVodVideoDetail): PlaySource[] {
-  const playFrom = detail.vod_play_from || ''
-  const playUrl = detail.vod_play_url || ''
+export function catvodParsePlayList(detail: any): PlaySource[] {
+  const playFrom = detail.vod_play_from || detail.play_from || detail.playFrom || ''
+  const playUrl = detail.vod_play_url || detail.play_url || detail.playUrl || detail.url || ''
+
+  if (!playUrl) return []
+
   const sources = playFrom.split('$$$').filter(Boolean)
   const urls = playUrl.split('$$$').filter(Boolean)
 
@@ -390,11 +409,12 @@ export function catvodParsePlayList(detail: CatVodVideoDetail): PlaySource[] {
     const playUrls: PlayUrl[] = urlsStr
       .split('#')
       .filter(Boolean)
-      .map((item, idx) => {
+      .map((item: string, idx: number) => {
         const parts = item.split('$')
-        const name = parts[0] || `第${idx + 1}集`
-        const url = parts[1] || parts[0] || ''
-        return { name, url }
+        if (parts.length >= 2) {
+          return { name: parts[0], url: parts.slice(1).join('$') }
+        }
+        return { name: `第${idx + 1}集`, url: parts[0] || '' }
       })
 
     if (playUrls.length > 0) {

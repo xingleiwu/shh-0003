@@ -116,7 +116,30 @@ export function parseCatVodSource(url: string, content: string): { sources: Sour
 
   if (data.lives && Array.isArray(data.lives)) {
     data.lives.forEach((live: any) => {
-      if (live.url && typeof live.url === 'string' && live.url.startsWith('http')) {
+      if (live.channels && Array.isArray(live.channels)) {
+        const groupName = live.name || '直播源'
+        live.channels.forEach((ch: any) => {
+          if (ch.urls && Array.isArray(ch.urls) && ch.urls.length > 0) {
+            liveChannels.push({
+              id: generateId('live_'),
+              name: ch.name || '频道',
+              group: groupName,
+              logo: ch.logo || '',
+              urls: ch.urls.filter((u: any) => typeof u === 'string' && u.startsWith('http')),
+              sourceId: 'catvod_live',
+            })
+          } else if (ch.url && typeof ch.url === 'string' && ch.url.startsWith('http')) {
+            liveChannels.push({
+              id: generateId('live_'),
+              name: ch.name || '频道',
+              group: groupName,
+              logo: ch.logo || '',
+              urls: [ch.url],
+              sourceId: 'catvod_live',
+            })
+          }
+        })
+      } else if (live.url && typeof live.url === 'string' && live.url.startsWith('http')) {
         liveChannels.push({
           id: generateId('live_'),
           name: live.name || '直播',

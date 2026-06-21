@@ -44,6 +44,14 @@ export default defineConfig({
   server: {
     port: 12128,
     strictPort: true,
-    cors: true
+    cors: true,
+    proxy: {
+      '/api-proxy': {
+        target: 'http://localhost',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api-proxy/, ''),
+        followRedirects: true,
+      },
+    },
   }
 })

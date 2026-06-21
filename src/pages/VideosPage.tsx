@@ -295,7 +295,17 @@ export const VideosPage: React.FC = () => {
     const source = getSourceById(sourceId)
     const baseUrl = source?.url || ''
 
-    const playList = videoDetail ? catvodParsePlayList(videoDetail) : []
+    let playList = videoDetail ? catvodParsePlayList(videoDetail) : []
+    if (playList.length > 0 && baseUrl) {
+      playList = playList.map(ps => ({
+        name: ps.name,
+        urls: ps.urls.map(pu => ({
+          name: pu.name,
+          url: resolveImgUrl(pu.url, baseUrl),
+        })),
+      }))
+    }
+
     const videoData = catvodVideoToVideo(
       videoDetail ? { ...videoDetail, vod_pic: videoDetail.vod_pic || item.vod_pic } : item,
       sourceId,
@@ -322,20 +332,28 @@ export const VideosPage: React.FC = () => {
     const source = sources.find((s) => s.id === sourceId) || videoSources[0]
     const baseUrl = source?.url || ''
 
-    let playList = videoDetail ? catvodParsePlayList(videoDetail) : []
-
-    if (playList.length === 0 && source) {
+    let detail = videoDetail
+    if (!detail && source) {
       const vodId = item.vod_id || (item as any).id
       if (vodId) {
-        const detail = await catvodGetVideoDetail(source, String(vodId))
-        if (detail) {
-          playList = catvodParsePlayList(detail)
-        }
+        detail = await catvodGetVideoDetail(source, String(vodId))
       }
     }
 
+    let playList = detail ? catvodParsePlayList(detail) : []
+
+    if (playList.length > 0 && baseUrl) {
+      playList = playList.map(ps => ({
+        name: ps.name,
+        urls: ps.urls.map(pu => ({
+          name: pu.name,
+          url: resolveImgUrl(pu.url, baseUrl),
+        })),
+      }))
+    }
+
     const videoForPlay = catvodVideoToVideo(
-      videoDetail ? { ...videoDetail, vod_pic: videoDetail.vod_pic || item.vod_pic } : item,
+      detail ? { ...detail, vod_pic: detail.vod_pic || item.vod_pic } : item,
       sourceId,
       baseUrl,
       playList

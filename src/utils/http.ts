@@ -31,14 +31,17 @@ function decodeBuffer(buffer: ArrayBuffer, contentType?: string): string {
 const createHttpClient = () => {
   const networkSettings = useAppStore.getState().settings.network
 
+  const defaultHeaders: Record<string, string> = {
+    'User-Agent': networkSettings.userAgent,
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Accept-Encoding': 'gzip, deflate',
+  }
+
   const client = axios.create({
     timeout: networkSettings.timeout,
     responseType: 'arraybuffer',
-    headers: {
-      'User-Agent': networkSettings.userAgent,
-      'Accept': 'application/json, text/plain, */*',
-      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-    },
+    headers: defaultHeaders,
   })
 
   client.interceptors.request.use(
