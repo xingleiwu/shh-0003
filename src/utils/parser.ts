@@ -92,21 +92,23 @@ export function parseCatVodSource(url: string, content: string): { sources: Sour
     data.sites.forEach((site: any) => {
       if (site.type === 1) return
       const siteType = site.type === 1 ? 'novel' as const : 'video' as const
-      const siteUrl = resolveSiteUrl(site, url)
       const isSpider = site.api && typeof site.api === 'string' && isSpiderApi(site.api)
+      const isSpiderUrl = site.api && typeof site.api === 'string' && site.api.startsWith('http') && site.type === 4
+      const siteUrl = resolveSiteUrl(site, url)
+      const finalUrl = isSpiderUrl ? site.api : siteUrl
 
       sources.push({
         id: generateId('src_'),
         name: site.name || '未知源',
         type: siteType,
-        url: siteUrl,
-        enabled: site.enable !== false && site.searchable !== 0 && !!siteUrl && siteUrl.startsWith('http'),
+        url: finalUrl,
+        enabled: site.enable !== false && site.searchable !== 0 && !!finalUrl && finalUrl.startsWith('http'),
         createdAt: Date.now(),
         updatedAt: Date.now(),
         config: {
           apiType: 'catvod',
           headers: parseSourceHeader(site.header || data.header),
-          isSpider: isSpider || undefined,
+          isSpider: isSpider || isSpiderUrl || undefined,
           spiderName: isSpider ? site.api : undefined,
           ext: site.ext || undefined,
         },
@@ -164,21 +166,23 @@ export function parseTvBoxSource(url: string, content: string): { sources: Sourc
 
   if (data.sites && Array.isArray(data.sites)) {
     data.sites.forEach((site: any) => {
-      const siteUrl = resolveSiteUrl(site, url)
       const isSpider = site.api && typeof site.api === 'string' && isSpiderApi(site.api)
+      const isSpiderUrl = site.api && typeof site.api === 'string' && site.api.startsWith('http') && site.type === 4
+      const siteUrl = resolveSiteUrl(site, url)
+      const finalUrl = isSpiderUrl ? site.api : siteUrl
 
       sources.push({
         id: generateId('src_'),
         name: site.name || '未知源',
         type: 'video',
-        url: siteUrl,
-        enabled: site.enable !== false && site.searchable !== 0 && !!siteUrl && siteUrl.startsWith('http'),
+        url: finalUrl,
+        enabled: site.enable !== false && site.searchable !== 0 && !!finalUrl && finalUrl.startsWith('http'),
         createdAt: Date.now(),
         updatedAt: Date.now(),
         config: {
           apiType: 'tvbox',
           headers: parseSourceHeader(site.header || data.header),
-          isSpider: isSpider || undefined,
+          isSpider: isSpider || isSpiderUrl || undefined,
           spiderName: isSpider ? site.api : undefined,
           ext: site.ext || undefined,
         },

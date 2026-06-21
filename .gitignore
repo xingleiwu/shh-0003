@@ -7,3 +7,12 @@ release
 .vite
 .env
 .env.local
+*.jar
+*.dex
+META-INF/
+OmniboxJar/
+test-*.js
+test_*.py
+temp_*.json
+analyze-*.js
+save-*.js

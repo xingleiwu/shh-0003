@@ -97,6 +97,7 @@ export const VideosPage: React.FC = () => {
   const [detailModal, setDetailModal] = useState<{ item: CatVodVideo; sourceId: string } | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [videoDetail, setVideoDetail] = useState<CatVodVideoDetail | null>(null)
+  const [debugInfo, setDebugInfo] = useState<string>('')
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -277,13 +278,28 @@ export const VideosPage: React.FC = () => {
     setDetailModal({ item, sourceId })
     setLoadingDetail(true)
     setVideoDetail(null)
+    setDebugInfo('')
 
     try {
       const vodId = item.vod_id || (item as any).id
+      console.log('[VideosPage] handleOpenDetail 调用参数:', {
+        sourceName: source.name,
+        sourceUrl: source.url,
+        sourceType: source.type,
+        apiType: source.config?.apiType,
+        vodId: String(vodId),
+        itemVodId: item.vod_id,
+        itemId: (item as any).id,
+      })
       const detail = vodId ? await catvodGetVideoDetail(source, String(vodId)) : null
+      console.log('[VideosPage] catvodGetVideoDetail 返回结果:', detail ? '有数据' : 'null', detail ? JSON.stringify(detail).slice(0, 500) : '')
+      if (!detail) {
+        setDebugInfo(`调试信息:\nsource.name=${source.name}\nsource.url=${source.url}\napiType=${source.config?.apiType}\nvodId=${String(vodId)}\nitem.vod_id=${item.vod_id}\nitem.id=${(item as any).id}\n\n返回结果: null`)
+      }
       setVideoDetail(detail)
     } catch (e) {
-      console.error('加载详情失败')
+      console.error('加载详情失败', e)
+      setDebugInfo(`错误: ${(e as Error).message}\n${(e as Error).stack}`)
     } finally {
       setLoadingDetail(false)
     }
@@ -295,7 +311,7 @@ export const VideosPage: React.FC = () => {
     const source = getSourceById(sourceId)
     const baseUrl = source?.url || ''
 
-    let playList = videoDetail ? catvodParsePlayList(videoDetail) : []
+    let playList = videoDetail ? catvodParsePlayList(videoDetail, source?.url) : []
     if (playList.length > 0 && baseUrl) {
       playList = playList.map(ps => ({
         name: ps.name,
@@ -340,7 +356,7 @@ export const VideosPage: React.FC = () => {
       }
     }
 
-    let playList = detail ? catvodParsePlayList(detail) : []
+    let playList = detail ? catvodParsePlayList(detail, source?.url) : []
 
     if (playList.length > 0 && baseUrl) {
       playList = playList.map(ps => ({
@@ -716,7 +732,7 @@ export const VideosPage: React.FC = () => {
                         <div className="flex items-center justify-between mb-4">
                           <h3 className="font-semibold text-lg text-black dark:text-white flex items-center gap-2">
                             <PlaySquare size={18} className="text-ios-blue" />
-                            {key.split('_').slice(1).join('_')}
+                            {key.split('_').pop()}
                           </h3>
                           <Button variant="ghost" size="sm" className="text-ios-blue">
                             查看全部 <ChevronRight size={14} />
@@ -724,7 +740,7 @@ export const VideosPage: React.FC = () => {
                         </div>
                         <div className="grid grid-cols-6 gap-4">
                           {list.slice(0, 6).map((item, index) =>
-                            renderVideoCard(item, key.split('_')[0], index)
+                            renderVideoCard(item, key.split('_').slice(0, -1).join('_'), index)
                           )}
                         </div>
                       </section>
@@ -849,8 +865,8 @@ export const VideosPage: React.FC = () => {
                     <h4 className="text-sm font-medium text-black dark:text-white mb-3">播放源</h4>
                     {videoDetail ? (
                       <div className="space-y-3 max-h-60 overflow-y-auto scrollbar-ios">
-                        {catvodParsePlayList(videoDetail).length > 0 ? (
-                          catvodParsePlayList(videoDetail).map((src, idx) => (
+                        {catvodParsePlayList(videoDetail, getSourceById(detailModal.sourceId)?.url).length > 0 ? (
+                          catvodParsePlayList(videoDetail, getSourceById(detailModal.sourceId)?.url).map((src, idx) => (
                             <div key={idx} className="p-3 bg-ios-gray6 dark:bg-[#2C2C2E] rounded-ios">
                               <div className="flex items-center justify-between mb-2">
                                 <span className="font-medium text-sm">{src.name}</span>
@@ -880,6 +896,14 @@ export const VideosPage: React.FC = () => {
                     ) : (
                       <div className="p-3 bg-ios-gray6 dark:bg-[#2C2C2E] rounded-ios text-sm text-ios-gray">
                         暂无详细信息，可直接播放
+                      </div>
+                    )}
+                    {debugInfo && (
+                      <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-ios">
+                        <h5 className="text-xs font-medium text-yellow-800 dark:text-yellow-300 mb-2">🔍 调试信息</h5>
+                        <pre className="text-xs text-yellow-700 dark:text-yellow-400 whitespace-pre-wrap font-mono break-all">
+                          {debugInfo}
+                        </pre>
                       </div>
                     )}
                   </div>

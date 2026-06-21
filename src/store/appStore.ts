@@ -60,6 +60,7 @@ interface AppState {
   setDarkMode: (isDark: boolean) => void
 
   importSources: (sources: Source[]) => void
+  clearAllSources: () => void
 }
 
 const defaultSettings: Settings = {
@@ -286,6 +287,8 @@ export const useAppStore = create<AppState>()(
           }))
           return { sources: [...state.sources, ...newSources] }
         }),
+
+      clearAllSources: () => set({ sources: [] }),
     }),
     {
       name: 'reader-hub-storage',

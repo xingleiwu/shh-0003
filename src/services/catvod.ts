@@ -69,8 +69,95 @@ export interface CatVodBook {
   type_name?: string
 }
 
+function isSpiderApiUrl(url: string): boolean {
+  if (!url) return false
+  return url.includes('/api/tvbox/source/') ||
+    url.includes('/api/proxy/') ||
+    (url.includes('/api/') && url.includes('token='))
+}
+
+function isOmniBoxUrl(url: string): boolean {
+  if (!url) return false
+  return url.includes('/api/tvbox/source/')
+}
+
+function extractOmniBoxInfo(sourceUrl: string): { baseUrl: string; sourceId: string } | null {
+  const match = sourceUrl.match(/^(https?:\/\/[^\/]+)\/api\/tvbox\/source\/([^?]+)/)
+  if (!match) return null
+  return { baseUrl: match[1], sourceId: match[2] }
+}
+
+const omniboxTokenCache: Record<string, { token: string; expiresAt: number }> = {}
+
+async function omniboxLogin(baseUrl: string, password: string): Promise<string | null> {
+  const cacheKey = baseUrl
+  const cached = omniboxTokenCache[cacheKey]
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.token
+  }
+
+  try {
+    const r = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    })
+    const data = await r.json()
+    if (data.code === 200 && data.data?.token) {
+      omniboxTokenCache[cacheKey] = {
+        token: data.data.token,
+        expiresAt: data.data.expiresAt ? new Date(data.data.expiresAt).getTime() - 60000 : Date.now() + 86400000,
+      }
+      console.log(`[omniboxLogin] 登录成功: ${baseUrl}`)
+      return data.data.token
+    }
+    console.log(`[omniboxLogin] 登录失败: ${data.message}`)
+    return null
+  } catch (e) {
+    console.error(`[omniboxLogin] 登录异常:`, (e as Error).message)
+    return null
+  }
+}
+
+async function omniboxExecute(
+  baseUrl: string,
+  sourceId: string,
+  authToken: string,
+  method: string,
+  params: Record<string, any>
+): Promise<any> {
+  const url = `${baseUrl}/api/spider-source/${sourceId}/execute`
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${authToken}`,
+    },
+    body: JSON.stringify({ method, params }),
+  })
+  const data = await r.json()
+  if (data.success && data.data) {
+    return data.data
+  }
+  throw new Error(data.message || 'execute调用失败')
+}
+
 function buildApiUrl(baseUrl: string, params: Record<string, any>): string {
   let url = baseUrl.replace(/\/$/, '')
+  if (isSpiderApiUrl(url)) {
+    const allParams = { ...params }
+    if (isOmniBoxUrl(url) && !url.includes('conv=')) {
+      allParams.conv = '2'
+    }
+    const query = Object.entries(allParams)
+      .filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+      .join('&')
+    if (url.includes('?')) {
+      return `${url}&${query}`
+    }
+    return `${url}?${query}`
+  }
   if (!url.includes('/api.php') && !url.includes('/api/') && !url.includes('/provide') && !url.includes('ac=')) {
     url = url + '/api.php/provide/vod/'
   }
@@ -320,6 +407,92 @@ export async function catvodGetVideoDetail(
   vodId: string
 ): Promise<CatVodVideoDetail | null> {
   try {
+    const isSpider = isSpiderApiUrl(source.url)
+    const isOmniBox = isOmniBoxUrl(source.url)
+
+    if (isOmniBox && source.config?.omniboxPassword) {
+      const info = extractOmniBoxInfo(source.url)
+      if (info) {
+        try {
+          const authToken = await omniboxLogin(info.baseUrl, source.config.omniboxPassword)
+          if (authToken) {
+            const result = await omniboxExecute(info.baseUrl, info.sourceId, authToken, 'detail', { videoId: vodId })
+            console.log(`[catvodGetVideoDetail] OmniBox execute detail 原始响应:`, JSON.stringify(result).slice(0, 2000))
+            if (result && result.list && result.list.length > 0) {
+              const item = result.list[0]
+              console.log(`[catvodGetVideoDetail] OmniBox detail成功:`, JSON.stringify(item).slice(0, 1000))
+              return item
+            }
+            if (result && (result.vod_id || result.vod_name)) {
+              console.log(`[catvodGetVideoDetail] OmniBox detail (非list格式):`, JSON.stringify(result).slice(0, 1000))
+              return result
+            }
+          }
+        } catch (e) {
+          console.log(`[catvodGetVideoDetail] OmniBox execute detail 失败:`, (e as Error).message)
+        }
+      }
+    }
+
+    if (isSpider) {
+      const tryUrls = [
+        buildApiUrl(source.url, { ac: 'detail', ids: vodId }),
+        buildApiUrl(source.url, { ac: 'detail', id: vodId }),
+        buildApiUrl(source.url, {}),
+      ]
+
+      for (const url of tryUrls) {
+        try {
+          const data = await fetchJson(url, source.config?.headers)
+          console.log(`[catvodGetVideoDetail] Spider URL: ${url.replace(source.url, 'API')}`)
+          console.log(`[catvodGetVideoDetail] Spider原始响应 keys:`, Object.keys(data || {}))
+
+          const list = normalizeList(data)
+          console.log(`[catvodGetVideoDetail] list长度: ${list.length}`)
+
+          if (list.length > 0) {
+            const item = list.find((v: any) => String(v.vod_id || v.id) === String(vodId))
+            if (item) {
+              console.log(`[catvodGetVideoDetail] Spider找到匹配项:`, JSON.stringify(item).slice(0, 1000))
+              console.log(`[catvodGetVideoDetail] vod_play_from:`, item.vod_play_from || '(空)')
+              console.log(`[catvodGetVideoDetail] vod_play_url:`, (item.vod_play_url || '(空)').slice(0, 500))
+              return item
+            }
+
+            if (list.length === 1) {
+              const onlyItem = list[0]
+              console.log(`[catvodGetVideoDetail] list只有1项，直接返回:`, JSON.stringify(onlyItem).slice(0, 1000))
+              console.log(`[catvodGetVideoDetail] vod_play_from:`, onlyItem.vod_play_from || '(空)')
+              console.log(`[catvodGetVideoDetail] vod_play_url:`, (onlyItem.vod_play_url || '(空)').slice(0, 500))
+              return onlyItem
+            }
+          }
+
+          const detail = normalizeDetail(data)
+          if (detail) {
+            const detailId = String(detail.vod_id || detail.id || '')
+            if (detailId === String(vodId)) {
+              console.log(`[catvodGetVideoDetail] Spider normalizeDetail成功:`, JSON.stringify(detail).slice(0, 1000))
+              return detail
+            }
+            if (detail.vod_play_url || detail.play_url || detail.url) {
+              console.log(`[catvodGetVideoDetail] Spider normalizeDetail有播放地址，即使id不匹配也返回:`, JSON.stringify(detail).slice(0, 1000))
+              return detail
+            }
+            if (list.length === 0 && detail.vod_name) {
+              console.log(`[catvodGetVideoDetail] Spider normalizeDetail有名称，返回:`, JSON.stringify(detail).slice(0, 1000))
+              return detail
+            }
+          }
+        } catch (e) {
+          console.log(`[catvodGetVideoDetail] Spider URL尝试失败:`, (e as Error).message)
+          continue
+        }
+      }
+      console.error(`[catvodGetVideoDetail] Spider源详情获取失败，所有URL均未找到匹配项`)
+      return null
+    }
+
     const tryUrls = [
       buildApiUrl(source.url, { ac: 'detail', ids: vodId }),
       buildApiUrl(source.url, { ac: 'detail', id: vodId }),
@@ -358,8 +531,95 @@ export async function catvodGetPlayUrl(
   source: Source,
   playFlag: string,
   playUrl: string
-): Promise<{ url: string | null; parse?: number }> {
+): Promise<{ url: string | null; parse?: number; header?: Record<string, string> }> {
   try {
+    if (playUrl.startsWith('http://') || playUrl.startsWith('https://')) {
+      if (playUrl.includes('.m3u8') || playUrl.includes('.mp4') || playUrl.includes('.mkv') || playUrl.includes('.webm')) {
+        console.log(`[catvodGetPlayUrl] 直接可播放URL: ${playUrl.slice(0, 200)}`)
+        return { url: playUrl, parse: 0 }
+      }
+    }
+
+    const isSpider = isSpiderApiUrl(source.url)
+    const isOmniBox = isOmniBoxUrl(source.url)
+
+    if (isOmniBox && source.config?.omniboxPassword) {
+      const info = extractOmniBoxInfo(source.url)
+      if (info) {
+        try {
+          const authToken = await omniboxLogin(info.baseUrl, source.config.omniboxPassword)
+          if (authToken) {
+            const result = await omniboxExecute(info.baseUrl, info.sourceId, authToken, 'play', { playId: playUrl, flag: playFlag || 'play' })
+            console.log(`[catvodGetPlayUrl] OmniBox execute play 原始响应:`, JSON.stringify(result).slice(0, 1000))
+            if (result && result.urls && Array.isArray(result.urls) && result.urls.length > 0) {
+              const playResult = result.urls[0]
+              let resolvedUrl = playResult.url || ''
+              const header = result.header || undefined
+              if (resolvedUrl && !resolvedUrl.startsWith('http')) {
+                resolvedUrl = `${info.baseUrl}/api/spider-source/proxy-play?url=${encodeURIComponent(resolvedUrl)}`
+                if (header) {
+                  try {
+                    const headerStr = JSON.stringify(header)
+                    const encoded = btoa(unescape(encodeURIComponent(headerStr)))
+                    resolvedUrl += `&headers=${encodeURIComponent(encoded)}`
+                  } catch {}
+                }
+              }
+              console.log(`[catvodGetPlayUrl] OmniBox play成功: ${resolvedUrl.slice(0, 200)}`)
+              return { url: resolvedUrl, parse: 0, header }
+            }
+            if (result && typeof result.url === 'string') {
+              let resolvedUrl = result.url
+              if (!resolvedUrl.startsWith('http')) {
+                resolvedUrl = `${info.baseUrl}/api/spider-source/proxy-play?url=${encodeURIComponent(resolvedUrl)}`
+              }
+              console.log(`[catvodGetPlayUrl] OmniBox play (url格式): ${resolvedUrl.slice(0, 200)}`)
+              return { url: resolvedUrl, parse: 0, header: result.header || undefined }
+            }
+          }
+        } catch (e) {
+          console.log(`[catvodGetPlayUrl] OmniBox execute play 失败:`, (e as Error).message)
+        }
+      }
+    }
+
+    if (isSpider) {
+      const spiderTryUrls = [
+        buildApiUrl(source.url, { ac: 'play', flag: playFlag, id: playUrl }),
+        buildApiUrl(source.url, { ac: 'play', flag: playFlag, ids: playUrl }),
+      ]
+
+      for (const apiUrl of spiderTryUrls) {
+        try {
+          const data = await fetchJson(apiUrl, source.config?.headers)
+          console.log(`[catvodGetPlayUrl] Spider URL: ${apiUrl.replace(source.url, 'API')}`)
+          console.log(`[catvodGetPlayUrl] Spider响应:`, JSON.stringify(data).slice(0, 1000))
+
+          const resolvedUrl =
+            data.url ||
+            data.data?.url ||
+            data.play_url ||
+            data.playUrl ||
+            data.data?.play_url ||
+            data.data?.playUrl ||
+            data.videoUrl ||
+            data.data?.videoUrl ||
+            data.urllist?.[0] ||
+            data.urls?.[0] ||
+            null
+
+          if (resolvedUrl && typeof resolvedUrl === 'string') {
+            const finalUrl = resolveUrl(resolvedUrl, source.url)
+            console.log(`[catvodGetPlayUrl] Spider解析成功: ${finalUrl.slice(0, 200)}`)
+            return { url: finalUrl, parse: data.parse ?? data.data?.parse ?? 1 }
+          }
+        } catch (e) {
+          console.log(`[catvodGetPlayUrl] Spider URL尝试失败:`, (e as Error).message)
+          continue
+        }
+      }
+    }
+
     const tryUrls = [
       buildApiUrl(source.url, { ac: 'play', flag: playFlag, id: playUrl }),
       buildApiUrl(source.url, { ac: 'parse', flag: playFlag, id: playUrl }),
@@ -516,12 +776,34 @@ export async function catvodGetChapterContent(
   }
 }
 
-export function catvodParsePlayList(detail: any): PlaySource[] {
+export function catvodParsePlayList(detail: any, sourceUrl?: string): PlaySource[] {
   if (!detail || typeof detail !== 'object') {
     console.log('[catvodParsePlayList] detail为空或非对象，返回空数组')
     return []
   }
   console.log(`[catvodParsePlayList] 输入detail对象所有key:`, Object.keys(detail || {}))
+
+  if (detail.vod_play_sources && Array.isArray(detail.vod_play_sources) && detail.vod_play_sources.length > 0) {
+    console.log(`[catvodParsePlayList] 检测到OmniBox格式 vod_play_sources, ${detail.vod_play_sources.length}个源`)
+    const playList: PlaySource[] = []
+    for (const src of detail.vod_play_sources) {
+      if (!src || !src.episodes || !Array.isArray(src.episodes)) continue
+      const urls: PlayUrl[] = src.episodes
+        .filter((ep: any) => ep)
+        .map((ep: any) => ({
+          name: ep.name || ep.title || '播放',
+          url: ep.playId || ep.url || ep.id || '',
+        }))
+        .filter((u: PlayUrl) => u.url || u.name)
+      if (urls.length > 0) {
+        playList.push({ name: src.name || '默认线路', urls })
+      }
+    }
+    if (playList.length > 0) {
+      console.log(`[catvodParsePlayList] OmniBox格式解析成功: ${playList.length}个播放源`)
+      return playList
+    }
+  }
 
   const playFrom =
     detail.vod_play_from ||
@@ -551,6 +833,30 @@ export function catvodParsePlayList(detail: any): PlaySource[] {
 
   console.log(`[catvodParsePlayList] playFrom="${String(playFrom).slice(0, 200)}"`)
   console.log(`[catvodParsePlayList] playUrl="${String(playUrl).slice(0, 300)}"`)
+
+  const isSpider = sourceUrl ? isSpiderApiUrl(sourceUrl) : false
+
+  if (!playUrl && isSpider) {
+    const vodId = detail.vod_id || detail.id || ''
+    console.log(`[catvodParsePlayList] Spider源无vod_play_url，用vod_id=${vodId}构造虚拟播放列表`)
+    if (vodId) {
+      const typeName = detail.type_name || detail.vod_class || ''
+      const vodRemarks = detail.vod_remarks || ''
+      let episodeCount = 1
+      const epMatch = vodRemarks.match(/(\d+)/)
+      if (epMatch) episodeCount = parseInt(epMatch[1]) || 1
+
+      const urls: PlayUrl[] = []
+      if (episodeCount <= 1) {
+        urls.push({ name: '播放', url: String(vodId) })
+      } else {
+        for (let i = 1; i <= episodeCount; i++) {
+          urls.push({ name: `第${i}集`, url: `${vodId}_${i}` })
+        }
+      }
+      return [{ name: typeName || '默认线路', urls }]
+    }
+  }
 
   if (!playUrl) {
     for (const key of Object.keys(detail || {})) {

@@ -19,6 +19,7 @@ export interface SourceConfig {
   isSpider?: boolean
   spiderName?: string
   ext?: string
+  omniboxPassword?: string
 }
 
 export interface Book {

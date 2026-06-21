@@ -18,7 +18,7 @@ import { motion } from 'framer-motion'
 type FilterType = 'all' | 'novel' | 'video' | 'live' | 'mixed'
 
 export const SourcesPage: React.FC = () => {
-  const { sources, addSource, updateSource, removeSource, importSources, addLiveChannel } = useAppStore()
+  const { sources, addSource, updateSource, removeSource, importSources, addLiveChannel, clearAllSources } = useAppStore()
   const { showToast } = useToast()
   const [filter, setFilter] = useState<FilterType>('all')
   const [searchQuery, setSearchQuery] = useState('')
@@ -30,11 +30,13 @@ export const SourcesPage: React.FC = () => {
     url: string
     type: 'novel' | 'video' | 'live' | 'mixed'
     apiType: 'catvod' | 'tvbox' | 'yuedu' | 'iptv' | 'custom'
+    omniboxPassword: string
   }>({
     name: '',
     url: '',
     type: 'video',
     apiType: 'catvod',
+    omniboxPassword: '',
   })
   const [loading, setLoading] = useState(false)
 
@@ -117,7 +119,7 @@ export const SourcesPage: React.FC = () => {
           name: formData.name,
           url: formData.url,
           type: formData.type,
-          config: { apiType: formData.apiType },
+          config: { apiType: formData.apiType, omniboxPassword: formData.omniboxPassword || undefined },
         })
         showToast('数据源已更新', 'success')
       } else {
@@ -139,7 +141,7 @@ export const SourcesPage: React.FC = () => {
             url: formData.url,
             type: formData.type,
             enabled: true,
-            config: { apiType: formData.apiType },
+            config: { apiType: formData.apiType, omniboxPassword: formData.omniboxPassword || undefined },
           })
           showToast('数据源已添加', 'success')
         }
@@ -147,7 +149,7 @@ export const SourcesPage: React.FC = () => {
 
       setAddModalOpen(false)
       setEditSource(null)
-      setFormData({ name: '', url: '', type: 'video', apiType: 'catvod' })
+      setFormData({ name: '', url: '', type: 'video', apiType: 'catvod', omniboxPassword: '' })
     } catch (error) {
       showToast(`操作失败: ${(error as Error).message}`, 'error')
     } finally {
@@ -162,6 +164,7 @@ export const SourcesPage: React.FC = () => {
       url: source.url,
       type: source.type,
       apiType: source.config?.apiType || 'custom',
+      omniboxPassword: source.config?.omniboxPassword || '',
     })
     setAddModalOpen(true)
   }
@@ -170,13 +173,26 @@ export const SourcesPage: React.FC = () => {
     <div className="p-6 space-y-6 animate-fadeIn">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-black dark:text-white">数据源管理</h1>
-        <Button icon={<Plus size={18} />} onClick={() => {
-          setEditSource(null)
-          setFormData({ name: '', url: '', type: 'video', apiType: 'catvod' })
-          setAddModalOpen(true)
-        }}>
-          添加数据源
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="ghost"
+            onClick={() => {
+              if (confirm('确定要清空所有数据源吗？此操作不可恢复。')) {
+                clearAllSources()
+                showToast('已清空所有数据源', 'success')
+              }
+            }}
+          >
+            <Trash2 size={18} />
+          </Button>
+          <Button icon={<Plus size={18} />} onClick={() => {
+            setEditSource(null)
+            setFormData({ name: '', url: '', type: 'video', apiType: 'catvod', omniboxPassword: '' })
+            setAddModalOpen(true)
+          }}>
+            添加数据源
+          </Button>
+        </div>
       </div>
 
       <div className="flex gap-3 items-center">
@@ -353,6 +369,16 @@ export const SourcesPage: React.FC = () => {
               </select>
             </div>
           </div>
+
+          {formData.url.includes('/api/tvbox/source/') && (
+            <Input
+              label="OmniBox 管理密码"
+              type="password"
+              placeholder="输入 OmniBox 管理密码以获取播放信息"
+              value={formData.omniboxPassword}
+              onChange={(e) => setFormData({ ...formData, omniboxPassword: e.target.value })}
+            />
+          )}
 
           <div className="p-4 bg-ios-gray6 dark:bg-[#2C2C2E] rounded-ios">
             <h4 className="font-medium text-black dark:text-white mb-2 flex items-center gap-2">

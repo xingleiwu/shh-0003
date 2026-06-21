@@ -77,10 +77,15 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ video, onClose
 
     let finalUrl = rawUrl
 
-    if (currentVideoSource && !rawUrl.includes('.mp4') && !rawUrl.includes('.mkv') && !rawUrl.includes('.avi') && rawUrl.length < 300) {
+    const needsResolve = currentVideoSource && (
+      !rawUrl.startsWith('http') ||
+      (!rawUrl.includes('.mp4') && !rawUrl.includes('.mkv') && !rawUrl.includes('.avi') && !rawUrl.includes('.webm') && !rawUrl.includes('.m3u8'))
+    )
+
+    if (needsResolve) {
       try {
         console.log(`[VideoPlayerView] 正在解析播放地址: flag=${playFlag}, id=${rawUrl.slice(0, 100)}`)
-        const result = await catvodGetPlayUrl(currentVideoSource, playFlag, rawUrl)
+        const result = await catvodGetPlayUrl(currentVideoSource!, playFlag, rawUrl)
         if (result.url) {
           finalUrl = result.url
           console.log(`[VideoPlayerView] 解析成功，最终URL: ${finalUrl.slice(0, 200)}`)
