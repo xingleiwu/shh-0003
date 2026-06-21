@@ -328,7 +328,7 @@ export function parseTxtIptv(content: string): LiveChannel[] {
   return channels
 }
 
-export function detectSourceType(url: string, content: string): 'catvod' | 'tvbox' | 'yuedu' | 'iptv' | 'unknown' {
+export function detectSourceType(url: string, content: string): 'catvod' | 'tvbox' | 'yuedu' | 'iptv' | 'catvod-single' | 'unknown' {
   const data = safeJSONParse(content)
 
   if (data) {
@@ -344,6 +344,14 @@ export function detectSourceType(url: string, content: string): 'catvod' | 'tvbo
     }
 
     if (data.channels && Array.isArray(data.channels)) return 'iptv'
+
+    if ((data.class && Array.isArray(data.class)) ||
+        (data.type_list && Array.isArray(data.type_list)) ||
+        (data.list && Array.isArray(data.list)) ||
+        (data.vod_list && Array.isArray(data.vod_list)) ||
+        typeof data.code !== 'undefined') {
+      return 'catvod-single'
+    }
   }
 
   if (content.includes('#EXTM3U') || content.includes('#EXTINF:')) return 'iptv'
@@ -351,6 +359,10 @@ export function detectSourceType(url: string, content: string): 'catvod' | 'tvbo
 
   const ext = url.split('?')[0].split('.').pop()?.toLowerCase()
   if (ext === 'm3u' || ext === 'm3u8') return 'iptv'
+
+  if (url.includes('api.php') || url.includes('/provide/') || url.includes('/api/')) {
+    return 'catvod-single'
+  }
 
   return 'unknown'
 }
@@ -375,6 +387,24 @@ export async function parseSourceContent(url: string, content: string): Promise<
       result.liveChannels = parsed.liveChannels
       break
     }
+    case 'catvod-single': {
+      const urlNoQuery = url.split('?')[0].replace(/\/$/, '')
+      const match = urlNoQuery.match(/\/([^/]+)\/?$/)
+      const nameFromUrl = match ? decodeURIComponent(match[1]) : '影视源'
+      result.sources.push({
+        id: generateId('src_'),
+        name: nameFromUrl && nameFromUrl !== 'vod' && nameFromUrl !== 'api' ? nameFromUrl : '直连影视源',
+        type: 'video',
+        url: url,
+        enabled: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        config: {
+          apiType: 'catvod',
+        },
+      })
+      break
+    }
     case 'yuedu':
       result.sources = parseYueduSource(content)
       break
@@ -387,8 +417,24 @@ export async function parseSourceContent(url: string, content: string): Promise<
         result.liveChannels = parseTxtIptv(content)
       }
       break
-    default:
-      throw new Error('无法识别的数据源格式')
+    default: {
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        result.sources.push({
+          id: generateId('src_'),
+          name: '自定义源',
+          type: 'video',
+          url: url,
+          enabled: true,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          config: {
+            apiType: 'catvod',
+          },
+        })
+      } else {
+        throw new Error('无法识别的数据源格式')
+      }
+    }
   }
 
   return result
