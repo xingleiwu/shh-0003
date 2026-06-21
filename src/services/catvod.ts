@@ -6,6 +6,7 @@ export interface CatVodCategory {
   type_id: string
   type_name: string
   type_flag?: string
+  filter?: any
 }
 
 export interface CatVodVideo {
@@ -36,6 +37,7 @@ export interface CatVodVideoDetail {
   vod_score?: string | number
   vod_play_from?: string
   vod_play_url?: string
+  vod_play_note?: string
 }
 
 export interface CatVodChapter {
@@ -69,18 +71,65 @@ function buildApiUrl(baseUrl: string, params: Record<string, any>): string {
   return `${url}?${query}`
 }
 
+function resolveUrl(url: string, baseUrl: string): string {
+  if (!url) return ''
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url
+  }
+  try {
+    const base = new URL(baseUrl)
+    if (url.startsWith('//')) {
+      return base.protocol + url
+    }
+    if (url.startsWith('/')) {
+      return base.origin + url
+    }
+    return base.origin + '/' + url.replace(/^\.\//, '')
+  } catch {
+    return url
+  }
+}
+
+function normalizeList(data: any): any[] {
+  if (!data) return []
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data.list)) return data.list
+  if (data.data && Array.isArray(data.data.list)) return data.data.list
+  if (data.data && Array.isArray(data.data)) return data.data
+  if (Array.isArray(data.vod_list)) return data.vod_list
+  if (data.result && Array.isArray(data.result)) return data.result
+  if (data.items && Array.isArray(data.items)) return data.items
+  if (data.videos && Array.isArray(data.videos)) return data.videos
+  if (data.book_list && Array.isArray(data.book_list)) return data.book_list
+  return []
+}
+
+function normalizeClass(data: any): CatVodCategory[] {
+  if (!data) return []
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data.class)) return data.class
+  if (data.data && Array.isArray(data.data.class)) return data.data.class
+  if (Array.isArray(data.type_list)) return data.type_list
+  if (data.types && Array.isArray(data.types)) return data.types
+  if (data.categories && Array.isArray(data.categories)) return data.categories
+  return []
+}
+
+function normalizePageInfo(data: any, page: number): { page: number; pagecount: number; total: number; limit: number } {
+  if (!data) return { page, pagecount: 1, total: 0, limit: 20 }
+  return {
+    page: data.page || data.currentPage || data.curpage || page,
+    pagecount: data.pagecount || data.pageCount || data.page_count || data.totalpage || data.totalPage || 1,
+    total: data.total || data.totalcount || data.total_count || 0,
+    limit: data.limit || data.size || data.perpage || data.per_page || 20,
+  }
+}
+
 export async function catvodGetCategories(source: Source): Promise<CatVodCategory[]> {
   try {
     const url = buildApiUrl(source.url, { ac: 'list' })
     const data = await fetchJson(url, source.config?.headers)
-    if (data.class && Array.isArray(data.class)) {
-      return data.class
-    }
-    if (data.data?.class && Array.isArray(data.data.class)) {
-      return data.data.class
-    }
-    if (Array.isArray(data)) return data
-    return []
+    return normalizeClass(data)
   } catch (error) {
     console.error(`获取分类失败 [${source.name}]:`, error)
     return []
@@ -94,24 +143,24 @@ export async function catvodGetHomeContent(source: Source): Promise<{
   list: any[]
 }> {
   try {
-    const url = buildApiUrl(source.url, { ac: 'detail', pg: 1 })
+    const url = buildApiUrl(source.url, { ac: 'list', pg: 1 })
     const data = await fetchJson(url, source.config?.headers)
 
-    let categories: CatVodCategory[] = []
-    let videos: CatVodVideo[] = []
-    let books: CatVodBook[] = []
-    let list: any[] = []
-
-    if (data.class) categories = Array.isArray(data.class) ? data.class : []
-    if (data.list) list = Array.isArray(data.list) ? data.list : []
-    if (data.data?.class) categories = Array.isArray(data.data.class) ? data.data.class : categories
-    if (data.data?.list) list = Array.isArray(data.data.list) ? data.data.list : list
+    const categories = normalizeClass(data)
+    const list = normalizeList(data)
 
     const videosFromList = list.filter(
-      (item: any) => item.vod_id || item.vod_name || source.type === 'video' || source.type === 'mixed'
+      (item: any) =>
+        item.vod_id ||
+        item.vod_name ||
+        item.id ||
+        item.name ||
+        source.type === 'video' ||
+        source.type === 'mixed'
     )
     const booksFromList = list.filter(
-      (item: any) => item.book_id || item.book_name || source.type === 'novel'
+      (item: any) =>
+        item.book_id || item.book_name || item.bookId || item.bookName || source.type === 'novel'
     )
 
     return {
@@ -140,18 +189,17 @@ export async function catvodGetCategoryContent(
 }> {
   try {
     const url = buildApiUrl(source.url, {
-      ac: 'detail',
+      ac: 'list',
       t: categoryId,
       pg: page,
       ...extend,
     })
     const data = await fetchJson(url, source.config?.headers)
+    const list = normalizeList(data)
+    const pageInfo = normalizePageInfo(data, page)
     return {
-      page: data.page || 1,
-      pagecount: data.pagecount || 1,
-      total: data.total || 0,
-      limit: data.limit || 20,
-      list: Array.isArray(data.list) ? data.list : data.data?.list || [],
+      ...pageInfo,
+      list,
     }
   } catch (error) {
     console.error(`获取分类内容失败 [${source.name}]:`, error)
@@ -169,7 +217,7 @@ export async function catvodGetVideoDetail(
       ids: vodId,
     })
     const data = await fetchJson(url, source.config?.headers)
-    const list = Array.isArray(data.list) ? data.list : data.data?.list || []
+    const list = normalizeList(data)
     if (list.length > 0) return list[0]
     return null
   } catch (error) {
@@ -206,13 +254,24 @@ export async function catvodSearch(
   page: number = 1
 ): Promise<CatVodVideo[]> {
   try {
-    const url = buildApiUrl(source.url, {
-      wd: keyword,
-      pg: page,
-    })
-    const data = await fetchJson(url, source.config?.headers)
-    const list = Array.isArray(data.list) ? data.list : data.data?.list || []
-    return list
+    const urls = [
+      buildApiUrl(source.url, { ac: 'list', wd: keyword, pg: page }),
+      buildApiUrl(source.url, { wd: keyword, pg: page }),
+    ]
+
+    for (const url of urls) {
+      try {
+        const data = await fetchJson(url, source.config?.headers)
+        const list = normalizeList(data)
+        if (list.length > 0) {
+          return list
+        }
+      } catch (e) {
+        continue
+      }
+    }
+
+    return []
   } catch (error) {
     console.error(`搜索失败 [${source.name}]:`, error)
     return []
@@ -229,12 +288,12 @@ export async function catvodGetBookDetail(
       ids: bookId,
     })
     const data = await fetchJson(url, source.config?.headers)
-    const list = Array.isArray(data.list) ? data.list : data.data?.list || []
+    const list = normalizeList(data)
     if (list.length === 0) return { book: null, chapters: [] }
 
     const book: CatVodBook = list[0]
     let chapters: CatVodChapter[] = []
-    const playUrl = list[0].book_play_url || list[0].vod_play_url || ''
+    const playUrl = list[0].book_play_url || list[0].vod_play_url || list[0].url || ''
     const playFrom = list[0].book_play_from || list[0].vod_play_from || '默认'
 
     const sources = playFrom.split('$$$').filter(Boolean)
@@ -311,37 +370,71 @@ export function catvodParsePlayList(detail: CatVodVideoDetail): PlaySource[] {
   return playList
 }
 
-export function catvodVideoToVideo(item: CatVodVideo, sourceId: string, playList?: PlaySource[]): Video {
+export function catvodVideoToVideo(
+  item: any,
+  sourceId: string,
+  baseUrl: string,
+  playList?: PlaySource[]
+): Video {
+  const vodId = item.vod_id || item.id || ''
+  const vodName = item.vod_name || item.name || item.title || '未知'
+  const vodPic = item.vod_pic || item.pic || item.cover || item.img || item.picture || ''
+  const vodRemarks = item.vod_remarks || item.remarks || item.note || item.status || ''
+  const vodArea = item.vod_area || item.area || item.region || ''
+  const vodYear = item.vod_year || item.year || ''
+  const vodDirector = item.vod_director || item.director || ''
+  const vodActor = item.vod_actor || item.actor || item.actors || ''
+  const vodContent = item.vod_content || item.content || item.intro || item.desc || item.description || ''
+  const vodScore = item.vod_score || item.score || item.rating || ''
+  const typeName = item.type_name || item.typeName || item.category || ''
+
+  const cover = resolveUrl(vodPic, baseUrl)
+
   return {
     id: '',
-    name: item.vod_name,
-    cover: item.vod_pic,
-    intro: item.vod_content || '',
-    rating: typeof item.vod_score === 'string' ? parseFloat(item.vod_score) || undefined : item.vod_score,
-    year: item.vod_year,
-    area: item.vod_area,
-    director: item.vod_director,
-    actors: item.vod_actor?.split(/[,，]/)?.filter(Boolean) || [],
+    name: vodName,
+    cover,
+    intro: vodContent,
+    rating: typeof vodScore === 'string' ? parseFloat(vodScore) || undefined : vodScore,
+    year: vodYear,
+    area: vodArea,
+    director: vodDirector,
+    actors: typeof vodActor === 'string' ? vodActor.split(/[,，]/).filter(Boolean) : Array.isArray(vodActor) ? vodActor : [],
     sourceId,
     videoUrl: '',
     playList: playList || [],
-    category: item.type_name,
-    remarks: item.vod_remarks,
+    category: typeName,
+    remarks: vodRemarks,
     addedAt: 0,
   }
 }
 
-export function catvodBookToBook(item: CatVodBook, sourceId: string, chapters?: Chapter[]): Book {
+export function catvodBookToBook(
+  item: any,
+  sourceId: string,
+  baseUrl: string,
+  chapters?: Chapter[]
+): Book {
+  const bookId = item.book_id || item.vod_id || item.id || ''
+  const bookName = item.book_name || item.vod_name || item.name || item.title || '未知'
+  const bookPic = item.book_pic || item.vod_pic || item.cover || item.pic || item.img || ''
+  const bookAuthor = item.book_author || item.vod_director || item.author || '未知'
+  const bookDesc = item.book_desc || item.vod_content || item.intro || item.desc || item.description || ''
+  const bookRemarks = item.book_remarks || item.vod_remarks || item.remarks || ''
+  const typeName = item.type_name || item.typeName || item.category || ''
+
+  const cover = resolveUrl(bookPic, baseUrl)
+
   return {
     id: '',
-    name: item.book_name,
-    author: item.book_author || '未知',
-    cover: item.book_pic || '',
-    intro: item.book_desc || '',
+    name: bookName,
+    author: bookAuthor,
+    cover,
+    intro: bookDesc,
     sourceId,
-    bookUrl: item.book_id,
+    bookUrl: bookId,
     chapters: chapters || [],
-    category: item.type_name,
+    category: typeName,
     addedAt: 0,
   }
 }

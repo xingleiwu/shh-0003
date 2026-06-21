@@ -30,7 +30,7 @@ import { SegmentedControl } from '@/components/ui/SegmentedControl'
 import { Modal, ModalFooter } from '@/components/ui/Modal'
 import { Spinner } from '@/components/ui/Spinner'
 import { useToast } from '@/components/ui/Toast'
-import { truncate } from '@/utils'
+import { truncate, safeJSONParse } from '@/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   catvodGetHomeContent,
@@ -44,6 +44,25 @@ import {
   type CatVodVideo,
   type CatVodVideoDetail,
 } from '@/services/catvod'
+
+function resolveImgUrl(url: string, baseUrl: string): string {
+  if (!url) return ''
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    return url
+  }
+  try {
+    const base = new URL(baseUrl)
+    if (url.startsWith('//')) {
+      return base.protocol + url
+    }
+    if (url.startsWith('/')) {
+      return base.origin + url
+    }
+    return base.origin + '/' + url.replace(/^\.\//, '')
+  } catch {
+    return url
+  }
+}
 
 type ViewMode = 'grid' | 'list'
 type TabType = 'library' | 'discover'
@@ -273,11 +292,14 @@ export const VideosPage: React.FC = () => {
   const handleAddToLibrary = () => {
     if (!detailModal) return
     const { item, sourceId } = detailModal
+    const source = getSourceById(sourceId)
+    const baseUrl = source?.url || ''
 
     const playList = videoDetail ? catvodParsePlayList(videoDetail) : []
     const videoData = catvodVideoToVideo(
       videoDetail ? { ...videoDetail, vod_pic: videoDetail.vod_pic || item.vod_pic } : item,
       sourceId,
+      baseUrl,
       playList
     )
 
@@ -298,6 +320,7 @@ export const VideosPage: React.FC = () => {
     if (!detailModal) return
     const { item, sourceId } = detailModal
     const source = sources.find((s) => s.id === sourceId) || videoSources[0]
+    const baseUrl = source?.url || ''
 
     let playList = videoDetail ? catvodParsePlayList(videoDetail) : []
 
@@ -314,6 +337,7 @@ export const VideosPage: React.FC = () => {
     const videoForPlay = catvodVideoToVideo(
       videoDetail ? { ...videoDetail, vod_pic: videoDetail.vod_pic || item.vod_pic } : item,
       sourceId,
+      baseUrl,
       playList
     )
     addHistory({
@@ -342,9 +366,19 @@ export const VideosPage: React.FC = () => {
     navigate('/sources')
   }
 
-  const renderVideoCard = (item: CatVodVideo, sourceId: string, index: number) => (
+  const getSourceById = (sourceId: string) => {
+    return sources.find((s) => s.id === sourceId) || currentSourceForDiscover
+  }
+
+  const renderVideoCard = (item: CatVodVideo, sourceId: string, index: number) => {
+    const source = getSourceById(sourceId)
+    const baseUrl = source?.url || ''
+    const picUrl = resolveImgUrl(item.vod_pic || '', baseUrl)
+    const vodId = item.vod_id || (item as any).id
+
+    return (
     <motion.div
-      key={`${sourceId}_${item.vod_id || item.vod_name}_${index}`}
+      key={`${sourceId}_${vodId || item.vod_name}_${index}`}
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.02 }}
@@ -352,9 +386,9 @@ export const VideosPage: React.FC = () => {
     >
       <Card hoverable onClick={() => handleOpenDetail(item, sourceId)}>
         <div className="aspect-[2/3] relative bg-ios-gray6 dark:bg-[#2C2C2E] overflow-hidden rounded-ios-t">
-          {item.vod_pic ? (
+          {picUrl ? (
             <img
-              src={item.vod_pic}
+              src={picUrl}
               alt={item.vod_name}
               className="w-full h-full object-cover transition-transform group-hover:scale-105 duration-300"
               onError={(e) => {
@@ -384,7 +418,7 @@ export const VideosPage: React.FC = () => {
           )}
         </div>
         <CardContent className="p-3">
-          <h3 className="font-medium text-sm text-black dark:text-white truncate">{item.vod_name}</h3>
+          <h3 className="font-medium text-sm text-black dark:text-white truncate">{item.vod_name || (item as any).name || '未知'}</h3>
           <div className="flex items-center gap-2 mt-1 text-xs text-ios-gray">
             {item.vod_year && (
               <span className="flex items-center gap-1"><Calendar size={10} />{item.vod_year}</span>
@@ -395,6 +429,7 @@ export const VideosPage: React.FC = () => {
       </Card>
     </motion.div>
   )
+}
 
   return (
     <div className="p-6 space-y-6 animate-fadeIn">
@@ -735,7 +770,7 @@ export const VideosPage: React.FC = () => {
                   <div className="aspect-[2/3] rounded-ios bg-ios-gray6 dark:bg-[#2C2C2E] overflow-hidden">
                     {(videoDetail?.vod_pic || detailModal.item.vod_pic) ? (
                       <img
-                        src={videoDetail?.vod_pic || detailModal.item.vod_pic}
+                        src={resolveImgUrl(videoDetail?.vod_pic || detailModal.item.vod_pic || '', getSourceById(detailModal.sourceId)?.url || '')}
                         alt={detailModal.item.vod_name}
                         className="w-full h-full object-cover"
                       />
