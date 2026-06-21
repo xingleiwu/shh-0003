@@ -22,7 +22,8 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Spinner } from '@/components/ui/Spinner'
 import { List as ListComponent, ListItem } from '@/components/ui/List'
-import type { Video, PlaySource, PlayUrl } from '@/types'
+import type { Video, PlaySource, PlayUrl, Source } from '@/types'
+import { catvodGetPlayUrl } from '@/services/catvod'
 
 interface VideoPlayerViewProps {
   video: Video
@@ -30,7 +31,7 @@ interface VideoPlayerViewProps {
 }
 
 export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ video, onClose }) => {
-  const { settings, addHistory } = useAppStore()
+  const { settings, addHistory, sources } = useAppStore()
   const { showToast } = useToast()
 
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -52,6 +53,7 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ video, onClose
   const [currentSourceIndex, setCurrentSourceIndex] = useState(0)
   const [currentUrlIndex, setCurrentUrlIndex] = useState(0)
   const [buffered, setBuffered] = useState(0)
+  const [parsedUrl, setParsedUrl] = useState<string>('')
 
   const playList = video.playList || []
   const currentSource = playList[currentSourceIndex]
@@ -59,11 +61,38 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ video, onClose
 
   const playerSettings = settings.player
 
+  const currentVideoSource: Source | undefined = sources.find((s) => s.id === video.sourceId)
+
   useEffect(() => {
-    if (currentUrl && videoRef.current) {
-      loadVideo(currentUrl.url)
+    if (currentUrl && currentUrl.url) {
+      resolveAndLoadVideo(currentUrl.url, currentSource?.name || '默认')
+    } else if (video.videoUrl) {
+      resolveAndLoadVideo(video.videoUrl, '默认')
     }
-  }, [currentUrl])
+  }, [currentUrl, video.videoUrl, currentVideoSource])
+
+  const resolveAndLoadVideo = useCallback(async (rawUrl: string, playFlag: string) => {
+    setLoading(true)
+    setParsedUrl('')
+
+    let finalUrl = rawUrl
+
+    if (currentVideoSource && !rawUrl.includes('.mp4') && !rawUrl.includes('.mkv') && !rawUrl.includes('.avi') && rawUrl.length < 300) {
+      try {
+        console.log(`[VideoPlayerView] 正在解析播放地址: flag=${playFlag}, id=${rawUrl.slice(0, 100)}`)
+        const result = await catvodGetPlayUrl(currentVideoSource, playFlag, rawUrl)
+        if (result.url) {
+          finalUrl = result.url
+          console.log(`[VideoPlayerView] 解析成功，最终URL: ${finalUrl.slice(0, 200)}`)
+        }
+      } catch (e) {
+        console.error('[VideoPlayerView] 解析播放地址失败，使用原始URL:', e)
+      }
+    }
+
+    setParsedUrl(finalUrl)
+    loadVideo(finalUrl)
+  }, [currentVideoSource])
 
   const loadVideo = useCallback((url: string) => {
     const video = videoRef.current
@@ -76,7 +105,9 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ video, onClose
       hlsRef.current = null
     }
 
-    if (url.includes('.m3u8') && Hls.isSupported()) {
+    console.log(`[VideoPlayerView] 开始加载视频: ${url.slice(0, 200)}`)
+
+    if ((url.includes('.m3u8') || url.includes('m3u8')) && Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
@@ -85,14 +116,18 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ video, onClose
       hls.loadSource(url)
       hls.attachMedia(video)
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        console.log('[VideoPlayerView] HLS manifest解析成功')
         setLoading(false)
         if (playerSettings.autoPlay) {
-          video.play().catch(() => setIsPlaying(false))
+          video.play().catch((e) => {
+            console.error('[VideoPlayerView] 自动播放失败:', e)
+            setIsPlaying(false)
+          })
         }
       })
       hls.on(Hls.Events.ERROR, (_event, data) => {
+        console.error('[VideoPlayerView] HLS error:', data)
         if (data.fatal) {
-          console.error('HLS fatal error:', data)
           showToast('视频加载失败，尝试切换线路', 'error')
           switchToNextLine()
         }
@@ -100,9 +135,19 @@ export const VideoPlayerView: React.FC<VideoPlayerViewProps> = ({ video, onClose
     } else {
       video.src = url
       video.load()
-      setLoading(false)
+      video.onloadeddata = () => {
+        setLoading(false)
+      }
+      video.onerror = () => {
+        console.error('[VideoPlayerView] video元素加载错误')
+        setLoading(false)
+        showToast('视频加载失败，尝试切换线路', 'error')
+      }
       if (playerSettings.autoPlay) {
-        video.play().catch(() => setIsPlaying(false))
+        video.play().catch((e) => {
+          console.error('[VideoPlayerView] 自动播放失败:', e)
+          setIsPlaying(false)
+        })
       }
     }
   }, [playerSettings.autoPlay, showToast])

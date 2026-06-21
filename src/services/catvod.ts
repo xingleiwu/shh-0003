@@ -114,6 +114,19 @@ function normalizeList(data: any): any[] {
   if (data.items && Array.isArray(data.items)) return data.items
   if (data.videos && Array.isArray(data.videos)) return data.videos
   if (data.book_list && Array.isArray(data.book_list)) return data.book_list
+  if (data.vod && Array.isArray(data.vod)) return data.vod
+  if (data.content && Array.isArray(data.content)) return data.content
+  if (data.data?.vod_list && Array.isArray(data.data.vod_list)) return data.data.vod_list
+  if (data.data?.result && Array.isArray(data.data.result)) return data.data.result
+  for (const key of Object.keys(data)) {
+    const val = data[key]
+    if (Array.isArray(val) && val.length > 0) {
+      const first = val[0]
+      if (first && typeof first === 'object' && (first.vod_id || first.vod_name || first.id || first.name || first.book_id || first.book_name)) {
+        return val
+      }
+    }
+  }
   return []
 }
 
@@ -246,15 +259,94 @@ export async function catvodGetCategoryContent(
   }
 }
 
+function normalizeDetail(data: any): any | null {
+  if (!data) return null
+  if (typeof data !== 'object') return null
+  if (data.vod_id || data.vod_name || data.id || data.name) {
+    return data
+  }
+  const list = normalizeList(data)
+  if (list.length > 0) return list[0]
+  if (data.data) {
+    if (data.data.vod_id || data.data.vod_name || data.data.id || data.data.name) {
+      return data.data
+    }
+    const dataList = normalizeList(data.data)
+    if (dataList.length > 0) return dataList[0]
+    if (data.data.vod && typeof data.data.vod === 'object') {
+      if (data.data.vod.vod_id || data.data.vod.vod_name || data.data.vod.id || data.data.vod.name) {
+        return data.data.vod
+      }
+    }
+    if (data.data.info && typeof data.data.info === 'object') {
+      if (data.data.info.vod_id || data.data.info.vod_name || data.data.info.id || data.data.info.name) {
+        return data.data.info
+      }
+    }
+  }
+  if (data.vod && typeof data.vod === 'object') {
+    if (data.vod.vod_id || data.vod.vod_name || data.vod.id || data.vod.name) {
+      return data.vod
+    }
+  }
+  if (data.info && typeof data.info === 'object') {
+    if (data.info.vod_id || data.info.vod_name || data.info.id || data.info.name) {
+      return data.info
+    }
+  }
+  for (const key of Object.keys(data)) {
+    const val = data[key]
+    if (val && typeof val === 'object' && !Array.isArray(val)) {
+      if (val.vod_id || val.vod_name || val.id || val.name) {
+        return val
+      }
+      const subList = normalizeList(val)
+      if (subList.length > 0) return subList[0]
+      for (const subKey of Object.keys(val)) {
+        const subVal = val[subKey]
+        if (subVal && typeof subVal === 'object' && !Array.isArray(subVal)) {
+          if (subVal.vod_id || subVal.vod_name || subVal.id || subVal.name) {
+            return subVal
+          }
+        }
+      }
+    }
+  }
+  return null
+}
+
 export async function catvodGetVideoDetail(
   source: Source,
   vodId: string
 ): Promise<CatVodVideoDetail | null> {
   try {
-    const url = buildApiUrl(source.url, { ac: 'detail', ids: vodId })
-    const data = await fetchJson(url, source.config?.headers)
-    const list = normalizeList(data)
-    if (list.length > 0) return list[0]
+    const tryUrls = [
+      buildApiUrl(source.url, { ac: 'detail', ids: vodId }),
+      buildApiUrl(source.url, { ac: 'detail', id: vodId }),
+      buildApiUrl(source.url, { ac: 'vod', ids: vodId }),
+      buildApiUrl(source.url, { ac: 'vod', id: vodId }),
+      buildApiUrl(source.url, { ac: 'videolist', ids: vodId }),
+      buildApiUrl(source.url, { ac: 'videolist', id: vodId }),
+    ]
+
+    for (const url of tryUrls) {
+      try {
+        const data = await fetchJson(url, source.config?.headers)
+        console.log(`[catvodGetVideoDetail] URL: ${url}`)
+        console.log(`[catvodGetVideoDetail] 原始响应:`, JSON.stringify(data).slice(0, 2000))
+        const detail = normalizeDetail(data)
+        if (detail) {
+          console.log(`[catvodGetVideoDetail] 解析成功:`, JSON.stringify(detail).slice(0, 1000))
+          console.log(`[catvodGetVideoDetail] vod_play_from:`, detail.vod_play_from || detail.play_from || detail.playFrom || '(空)')
+          console.log(`[catvodGetVideoDetail] vod_play_url:`, (detail.vod_play_url || detail.play_url || detail.playUrl || detail.url || '(空)').toString().slice(0, 500))
+          return detail
+        }
+      } catch (e) {
+        console.log(`[catvodGetVideoDetail] URL尝试失败 ${url}:`, (e as Error).message)
+        continue
+      }
+    }
+    console.error(`获取视频详情失败 [${source.name}]: 所有URL格式均失败`)
     return null
   } catch (error) {
     console.error(`获取视频详情失败 [${source.name}]:`, error)
@@ -268,13 +360,45 @@ export async function catvodGetPlayUrl(
   playUrl: string
 ): Promise<{ url: string | null; parse?: number }> {
   try {
-    const apiUrl = buildApiUrl(source.url, { ac: 'play', flag: playFlag, id: playUrl })
-    const data = await fetchJson(apiUrl, source.config?.headers)
-    const resolvedUrl = data.url || data.data?.url || data.play_url || data.playUrl || null
-    if (resolvedUrl) {
-      return { url: resolveUrl(resolvedUrl, source.url), parse: data.parse }
+    const tryUrls = [
+      buildApiUrl(source.url, { ac: 'play', flag: playFlag, id: playUrl }),
+      buildApiUrl(source.url, { ac: 'parse', flag: playFlag, id: playUrl }),
+      buildApiUrl(source.url, { ac: 'vodplay', flag: playFlag, id: playUrl }),
+    ]
+
+    for (const apiUrl of tryUrls) {
+      try {
+        const data = await fetchJson(apiUrl, source.config?.headers)
+        console.log(`[catvodGetPlayUrl] URL: ${apiUrl}`)
+        console.log(`[catvodGetPlayUrl] 响应:`, JSON.stringify(data).slice(0, 1000))
+
+        const resolvedUrl =
+          data.url ||
+          data.data?.url ||
+          data.play_url ||
+          data.playUrl ||
+          data.data?.play_url ||
+          data.data?.playUrl ||
+          data.videoUrl ||
+          data.data?.videoUrl ||
+          data.urllist?.[0] ||
+          data.urls?.[0] ||
+          null
+
+        if (resolvedUrl && typeof resolvedUrl === 'string') {
+          const finalUrl = resolveUrl(resolvedUrl, source.url)
+          console.log(`[catvodGetPlayUrl] 解析成功: ${finalUrl.slice(0, 200)}`)
+          return { url: finalUrl, parse: data.parse ?? data.data?.parse ?? 1 }
+        }
+      } catch (e) {
+        console.log(`[catvodGetPlayUrl] URL尝试失败 ${apiUrl}:`, (e as Error).message)
+        continue
+      }
     }
-    return { url: resolveUrl(playUrl, source.url), parse: 0 }
+
+    const directUrl = resolveUrl(playUrl, source.url)
+    console.log(`[catvodGetPlayUrl] 直接使用原始URL: ${directUrl.slice(0, 200)}`)
+    return { url: directUrl, parse: 0 }
   } catch (error) {
     console.error(`解析播放地址失败 [${source.name}]:`, error)
     return { url: resolveUrl(playUrl, source.url), parse: 0 }
@@ -393,13 +517,57 @@ export async function catvodGetChapterContent(
 }
 
 export function catvodParsePlayList(detail: any): PlaySource[] {
-  const playFrom = detail.vod_play_from || detail.play_from || detail.playFrom || ''
-  const playUrl = detail.vod_play_url || detail.play_url || detail.playUrl || detail.url || ''
+  if (!detail || typeof detail !== 'object') {
+    console.log('[catvodParsePlayList] detail为空或非对象，返回空数组')
+    return []
+  }
+  console.log(`[catvodParsePlayList] 输入detail对象所有key:`, Object.keys(detail || {}))
 
-  if (!playUrl) return []
+  const playFrom =
+    detail.vod_play_from ||
+    detail.play_from ||
+    detail.playFrom ||
+    detail.vod_play_source ||
+    detail.play_source ||
+    detail.playSource ||
+    detail.source ||
+    detail.vod_source ||
+    detail.from ||
+    ''
 
-  const sources = playFrom.split('$$$').filter(Boolean)
-  const urls = playUrl.split('$$$').filter(Boolean)
+  const playUrl =
+    detail.vod_play_url ||
+    detail.play_url ||
+    detail.playUrl ||
+    detail.url ||
+    detail.vod_url ||
+    detail.video_url ||
+    detail.videoUrl ||
+    detail.vod_play_list ||
+    detail.play_list ||
+    detail.playList ||
+    detail.vod_urls ||
+    ''
+
+  console.log(`[catvodParsePlayList] playFrom="${String(playFrom).slice(0, 200)}"`)
+  console.log(`[catvodParsePlayList] playUrl="${String(playUrl).slice(0, 300)}"`)
+
+  if (!playUrl) {
+    for (const key of Object.keys(detail || {})) {
+      const val = detail[key]
+      if (typeof val === 'string' && (val.includes('$') || val.includes('#') || val.includes('http'))) {
+        if (val.length > 20 || val.includes('m3u8') || val.includes('.mp4')) {
+          console.log(`[catvodParsePlayList] 尝试使用字段 "${key}" 作为播放地址: ${val.slice(0, 200)}`)
+        }
+      }
+    }
+    return []
+  }
+
+  const sources = String(playFrom).split(/\$\$\$|@@@|\|\|\||###/).filter(Boolean)
+  const urls = String(playUrl).split(/\$\$\$|@@@|\|\|\||###/).filter(Boolean)
+
+  console.log(`[catvodParsePlayList] 解析得到 ${sources.length} 个播放源名称, ${urls.length} 组播放地址`)
 
   const playList: PlaySource[] = []
 
@@ -412,16 +580,22 @@ export function catvodParsePlayList(detail: any): PlaySource[] {
       .map((item: string, idx: number) => {
         const parts = item.split('$')
         if (parts.length >= 2) {
-          return { name: parts[0], url: parts.slice(1).join('$') }
+          return { name: parts[0] || `第${idx + 1}集`, url: parts.slice(1).join('$') }
         }
-        return { name: `第${idx + 1}集`, url: parts[0] || '' }
+        if (parts[0] && (parts[0].startsWith('http') || parts[0].includes('.m3u8') || parts[0].includes('.mp4'))) {
+          return { name: `第${idx + 1}集`, url: parts[0] }
+        }
+        return { name: parts[0] || `第${idx + 1}集`, url: '' }
       })
+      .filter(u => u.url)
 
     if (playUrls.length > 0) {
+      console.log(`[catvodParsePlayList] 播放源"${sourceName}"有 ${playUrls.length} 集`)
       playList.push({ name: sourceName, urls: playUrls })
     }
   }
 
+  console.log(`[catvodParsePlayList] 最终解析结果: ${playList.length} 个播放源`)
   return playList
 }
 
