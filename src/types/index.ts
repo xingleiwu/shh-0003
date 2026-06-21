@@ -15,6 +15,7 @@ export interface SourceConfig {
   detailUrl?: string
   playUrl?: string
   headers?: Record<string, string>
+  params?: Record<string, any>
 }
 
 export interface Book {
@@ -29,6 +30,7 @@ export interface Book {
   lastReadChapter?: string
   lastReadTime?: number
   addedAt: number
+  category?: string
 }
 
 export interface Chapter {
@@ -53,6 +55,8 @@ export interface Video {
   videoUrl: string
   playList?: PlaySource[]
   addedAt: number
+  category?: string
+  remarks?: string
 }
 
 export interface PlaySource {
@@ -73,6 +77,7 @@ export interface LiveChannel {
   epg?: string
   urls: string[]
   sourceId: string
+  url?: string
 }
 
 export interface LiveGroup {
@@ -84,7 +89,7 @@ export interface LocalFile {
   id: string
   name: string
   path: string
-  type: 'novel' | 'video' | 'subtitle'
+  type: 'novel' | 'video' | 'subtitle' | 'live'
   size: number
   addedAt: number
 }
@@ -94,6 +99,23 @@ export interface Settings {
   reader: ReaderSettings
   player: PlayerSettings
   network: NetworkSettings
+  appearance?: AppearanceSettings
+  data?: DataSettings
+}
+
+export interface AppearanceSettings {
+  windowSize?: string
+  minimizeToTray?: boolean
+  autoLaunch?: boolean
+  zoom?: number
+  animations?: boolean
+  rememberWindow?: boolean
+}
+
+export interface DataSettings {
+  autoBackup?: boolean
+  backupInterval?: 'hourly' | 'daily' | 'weekly' | 'monthly'
+  historyRetention?: number
 }
 
 export interface ReaderSettings {
@@ -106,6 +128,11 @@ export interface ReaderSettings {
   paragraphSpacing: number
   pageWidth: number
   flipMode: 'page' | 'scroll' | 'continuous'
+  tapToFlip?: boolean
+  tapSensitivity?: number
+  volumeKeyFlip?: boolean
+  keepScreenOn?: boolean
+  autoSaveProgress?: boolean
 }
 
 export interface PlayerSettings {
@@ -114,6 +141,12 @@ export interface PlayerSettings {
   enableHardwareDecoding: boolean
   skipIntro: number
   skipEnding: number
+  autoNext?: boolean
+  rememberSpeed?: boolean
+  defaultSpeed?: number
+  autoLoadSubtitle?: boolean
+  subtitleSize?: number
+  bufferSize?: 'small' | 'medium' | 'large'
 }
 
 export interface NetworkSettings {
@@ -121,6 +154,11 @@ export interface NetworkSettings {
   userAgent: string
   timeout: number
   retryCount: number
+  maxConcurrency?: number
+  parallelSearch?: boolean
+  autoLoadImages?: boolean
+  imageCache?: boolean
+  dnsCache?: boolean
 }
 
 export interface ReadProgress {

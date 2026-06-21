@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react'
-import { Routes, Route, useLocation } from 'react-router-dom'
+import { Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useAppStore } from '@/store/appStore'
 import { AppLayout } from '@/components/layout/AppLayout'
@@ -13,9 +13,42 @@ import { ReaderView } from '@/components/reader/ReaderView'
 import { VideoPlayerView } from '@/components/player/VideoPlayerView'
 import { LivePlayerView } from '@/components/player/LivePlayerView'
 
+const pathToView: Record<string, any> = {
+  '/': 'home',
+  '/books': 'books',
+  '/videos': 'videos',
+  '/live': 'live',
+  '/sources': 'sources',
+  '/settings': 'settings',
+}
+
+const viewToPath: Record<string, string> = {
+  home: '/',
+  books: '/books',
+  videos: '/videos',
+  live: '/live',
+  sources: '/sources',
+  settings: '/settings',
+}
+
 export const App: React.FC = () => {
   const location = useLocation()
-  const { currentBook, currentVideo, currentLiveChannel, liveChannels, isDarkMode, setDarkMode, settings } = useAppStore()
+  const navigate = useNavigate()
+  const { currentBook, currentVideo, currentLiveChannel, liveChannels, isDarkMode, setDarkMode, settings, currentView, setCurrentView } = useAppStore()
+
+  useEffect(() => {
+    const view = pathToView[location.pathname]
+    if (view && view !== currentView) {
+      setCurrentView(view)
+    }
+  }, [location.pathname])
+
+  useEffect(() => {
+    const path = viewToPath[currentView]
+    if (path && path !== location.pathname) {
+      navigate(path)
+    }
+  }, [currentView])
 
   useEffect(() => {
     const applyTheme = () => {

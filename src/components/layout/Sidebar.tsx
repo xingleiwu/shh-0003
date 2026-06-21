@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useRef } from 'react'
 import {
   Home,
   BookOpen,
@@ -10,9 +10,13 @@ import {
   BookMarked,
   Folder,
   Plus,
+  X,
 } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import { cn } from '@/utils'
+import { useToast } from '@/components/ui/Toast'
+import { parseSourceContent } from '@/utils/parser'
+import { parseLocalNovel } from '@/utils/parser'
 
 type ViewType = 'home' | 'books' | 'videos' | 'live' | 'sources' | 'settings'
 
@@ -26,7 +30,26 @@ const navItems: { id: ViewType; label: string; icon: React.ReactNode }[] = [
 ]
 
 export const Sidebar: React.FC = () => {
-  const { currentView, setCurrentView, books, videos, liveChannels, sources, history } = useAppStore()
+  const {
+    currentView,
+    setCurrentView,
+    books,
+    videos,
+    liveChannels,
+    sources,
+    history,
+    addBook,
+    addVideo,
+    addLiveChannel,
+    importSources,
+    setCurrentBook,
+    setCurrentVideo,
+    setCurrentLiveChannel,
+    addHistory,
+    readProgress,
+  } = useAppStore()
+  const { showToast } = useToast()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const stats = {
     books: books.length,
@@ -37,6 +60,123 @@ export const Sidebar: React.FC = () => {
   }
 
   const recentHistory = history.slice(0, 3)
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+
+    let successCount = 0
+    let failCount = 0
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      try {
+        const content = await file.text()
+        const nameLower = file.name.toLowerCase()
+
+        if (nameLower.endsWith('.txt') || nameLower.endsWith('.epub')) {
+          const parsed = parseLocalNovel(file.name, content)
+          if (parsed.chapters.length > 0) {
+            const exists = books.some(b => b.name === parsed.name && b.author === parsed.author)
+            if (!exists) {
+              addBook({
+                name: parsed.name,
+                author: parsed.author,
+                cover: '',
+                intro: `本地导入：${file.name} · 共 ${parsed.chapters.length} 章`,
+                sourceId: 'local',
+                bookUrl: '',
+                chapters: parsed.chapters,
+              })
+              successCount++
+            } else {
+              failCount++
+            }
+          } else {
+            addVideo({
+              name: file.name.replace(/\.[^/.]+$/, ''),
+              cover: '',
+              intro: '本地视频文件',
+              sourceId: 'local',
+              videoUrl: file.name,
+              playList: [],
+              category: '本地视频',
+            })
+            successCount++
+          }
+        } else if (nameLower.endsWith('.m3u') || nameLower.endsWith('.m3u8') || nameLower.endsWith('.json')) {
+          const result = await parseSourceContent(file.name, content)
+          if (result.liveChannels.length > 0) {
+            result.liveChannels.forEach(channel => {
+              const exists = liveChannels.some(c => c.name === channel.name && c.url === channel.url)
+              if (!exists) {
+                addLiveChannel(channel)
+              }
+            })
+            successCount += result.liveChannels.length
+          }
+          if (result.sources.length > 0) {
+            importSources(result.sources)
+            successCount += result.sources.length
+          }
+          if (result.liveChannels.length === 0 && result.sources.length === 0) {
+            failCount++
+          }
+        } else {
+          failCount++
+        }
+      } catch (error) {
+        console.error(`处理文件 ${file.name} 失败:`, error)
+        failCount++
+      }
+    }
+
+    if (successCount > 0) {
+      showToast(`成功导入 ${successCount} 项${failCount > 0 ? `，${failCount} 项失败` : ''}`, 'success')
+    } else if (failCount > 0) {
+      showToast(`导入失败，${failCount} 个文件无法识别`, 'error')
+    }
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const handleHistoryClick = (item: any) => {
+    if (item.type === 'novel') {
+      const book = books.find(b => b.id === item.itemId)
+      if (book) {
+        addHistory({
+          type: 'novel',
+          itemId: book.id,
+          name: book.name,
+          cover: book.cover,
+          progress: readProgress[book.id]?.percentage || 0,
+        })
+        setCurrentBook(book)
+      } else {
+        showToast('书籍不存在，可能已被删除', 'warning')
+      }
+    } else if (item.type === 'video') {
+      const video = videos.find(v => v.id === item.itemId)
+      if (video) {
+        setCurrentVideo(video)
+      } else {
+        showToast('视频不存在，可能已被删除', 'warning')
+      }
+    } else if (item.type === 'live') {
+      const channel = liveChannels.find(c => c.id === item.itemId)
+      if (channel) {
+        setCurrentLiveChannel(channel)
+      } else {
+        showToast('频道不存在，可能已被删除', 'warning')
+      }
+    }
+  }
 
   return (
     <aside className="w-64 h-full flex flex-col bg-ios-grouped-background dark:bg-ios-grouped-backgroundDark border-r border-ios-gray5 dark:border-[#38383A]">
@@ -100,9 +240,10 @@ export const Sidebar: React.FC = () => {
               recentHistory.map((item) => (
                 <button
                   key={item.id}
+                  onClick={() => handleHistoryClick(item)}
                   className={cn(
                     'w-full flex items-center gap-2 px-2 py-2 rounded-ios text-left transition-all',
-                    'hover:bg-ios-gray6 dark:hover:bg-[#2C2C2E]'
+                    'hover:bg-ios-gray6 dark:hover:bg-[#2C2C2E] cursor-pointer'
                   )}
                 >
                   <div className="w-10 h-10 rounded-ios overflow-hidden bg-ios-gray6 dark:bg-[#2C2C2E] flex-shrink-0">
@@ -131,12 +272,21 @@ export const Sidebar: React.FC = () => {
         <div className="mt-6 px-3">
           <h3 className="text-xs font-medium text-ios-gray uppercase tracking-wider mb-2">本地文件</h3>
           <button
-            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-ios text-left transition-all hover:bg-ios-gray6 dark:hover:bg-[#2C2C2E] text-ios-blue"
+            onClick={handleImportClick}
+            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-ios text-left transition-all hover:bg-ios-gray6 dark:hover:bg-[#2C2C2E] text-ios-blue cursor-pointer"
           >
             <Folder size={20} />
             <span className="font-medium">导入本地文件</span>
             <Plus size={16} className="ml-auto" />
           </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".txt,.epub,.m3u,.m3u8,.json,.mp4,.mkv,.avi,.mov"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
         </div>
       </div>
 
