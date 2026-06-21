@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useRef } from 'react'
 import { BookOpen, Plus, Search, Filter, Grid3X3, List, BookMarked, Trash2, Play } from 'lucide-react'
 import { useAppStore } from '@/store/appStore'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -10,7 +10,8 @@ import { Modal, ModalFooter } from '@/components/ui/Modal'
 import { Spinner } from '@/components/ui/Spinner'
 import { useToast } from '@/components/ui/Toast'
 import { fetchUrl, fetchJson } from '@/utils/http'
-import { truncate, formatDate } from '@/utils'
+import { truncate, formatDate, generateId } from '@/utils'
+import { parseLocalNovel } from '@/utils/parser'
 import { motion } from 'framer-motion'
 
 type ViewMode = 'grid' | 'list'
@@ -28,6 +29,7 @@ export const BooksPage: React.FC = () => {
   const [selectedSource, setSelectedSource] = useState<string>('all')
   const [detailModal, setDetailModal] = useState<any>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const novelSources = sources.filter(s => s.type === 'novel' || s.type === 'mixed')
 
@@ -150,6 +152,67 @@ export const BooksPage: React.FC = () => {
       progress: readProgress[book.id]?.percentage || 0,
     })
     setCurrentBook(book)
+  }
+
+  const handleImportLocalNovel = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+
+    let successCount = 0
+    let failCount = 0
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      try {
+        if (!file.name.toLowerCase().endsWith('.txt') && !file.name.toLowerCase().endsWith('.epub')) {
+          failCount++
+          continue
+        }
+
+        const content = await file.text()
+        const parsed = parseLocalNovel(file.name, content)
+
+        if (parsed.chapters.length === 0) {
+          failCount++
+          continue
+        }
+
+        const exists = books.some(b => b.name === parsed.name && b.author === parsed.author)
+        if (exists) {
+          failCount++
+          continue
+        }
+
+        addBook({
+          name: parsed.name,
+          author: parsed.author,
+          cover: '',
+          intro: `本地导入：${file.name} · 共 ${parsed.chapters.length} 章`,
+          sourceId: 'local',
+          bookUrl: '',
+          chapters: parsed.chapters,
+        })
+
+        successCount++
+      } catch (error) {
+        console.error(`导入文件 ${file.name} 失败:`, error)
+        failCount++
+      }
+    }
+
+    if (successCount > 0) {
+      showToast(`成功导入 ${successCount} 本小说${failCount > 0 ? `，${failCount} 本失败` : ''}`, 'success')
+    } else if (failCount > 0) {
+      showToast(`导入失败，${failCount} 个文件无法识别或已存在`, 'error')
+    }
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
   }
 
   if (tab === 'discover') {
@@ -361,9 +424,17 @@ export const BooksPage: React.FC = () => {
           leftIcon={<Search size={18} />}
           className="flex-1"
         />
-        <Button variant="secondary" icon={<Plus size={18} />}>
+        <Button variant="secondary" icon={<Plus size={18} />} onClick={handleImportLocalNovel}>
           导入本地小说
         </Button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".txt,.epub"
+          multiple
+          onChange={handleFileSelect}
+          className="hidden"
+        />
       </div>
 
       {filteredBooks.length === 0 ? (
