@@ -610,12 +610,19 @@ export async function catvodGetPlayUrl(
   playUrl: string
 ): Promise<{ url: string | null; parse?: number; header?: Record<string, string> }> {
   try {
-    if (playUrl.startsWith('http://') || playUrl.startsWith('https://')) {
-      if (playUrl.includes('.m3u8') || playUrl.includes('.mp4') || playUrl.includes('.mkv') || playUrl.includes('.webm')) {
-        console.log(`[catvodGetPlayUrl] 直接可播放URL: ${playUrl.slice(0, 200)}`)
-        return { url: playUrl, parse: 0 }
+    let cleanUrl = String(playUrl || '')
+
+    if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')) {
+      const pipeIdx = cleanUrl.indexOf('|||')
+      if (pipeIdx > 0) cleanUrl = cleanUrl.slice(0, pipeIdx)
+
+      if (cleanUrl.includes('.m3u8') || cleanUrl.includes('.mp4') || cleanUrl.includes('.mkv') || cleanUrl.includes('.webm')) {
+        console.log(`[catvodGetPlayUrl] 直接可播放URL: ${cleanUrl.slice(0, 200)}`)
+        return { url: cleanUrl, parse: 0 }
       }
     }
+
+    playUrl = cleanUrl
 
     if (isSpiderEngineSource(source)) {
       const result = await window.electronAPI.spider.play(
@@ -982,8 +989,71 @@ export function catvodParsePlayList(detail: any, sourceOrUrl?: string | Source):
     return []
   }
 
-  const sources = String(playFrom).split(/\$\$\$|@@@|\|\|\||###/).filter(Boolean)
-  const urls = String(playUrl).split(/\$\$\$|@@@|\|\|\||###/).filter(Boolean)
+  const LINE_SEPARATORS = ['$$$', '###', '|||', '@@@']
+
+  function splitBySeparator(str: string, sep: string): string[] {
+    return String(str).split(sep).filter(Boolean)
+  }
+
+  function countEpisodesInGroup(urlGroup: string): number {
+    return urlGroup.split('#').filter(Boolean).length
+  }
+
+  function findBestSeparator(pFrom: string, pUrl: string): string {
+    let bestSep = '$$$'
+    let bestScore = -1
+
+    const fromLength = String(pFrom).length
+    const fromHasMultipleLines = LINE_SEPARATORS.some(sep => splitBySeparator(pFrom, sep).length > 1)
+
+    for (const sep of LINE_SEPARATORS) {
+      const fromParts = splitBySeparator(pFrom, sep)
+      const urlParts = splitBySeparator(pUrl, sep)
+      const fromCount = fromParts.length
+      const urlCount = urlParts.length
+
+      if (fromCount === 0 && urlCount === 0) continue
+
+      let score = 0
+
+      if (fromHasMultipleLines) {
+        if (fromCount > 1) score += 200
+        else continue
+      }
+
+      if (fromCount === urlCount && fromCount > 0) score += 150
+      else if (fromCount > 0 && urlCount > 0 && Math.abs(fromCount - urlCount) <= 2) score += 80
+      else if (fromCount > 1 && urlCount > 1 && Math.abs(fromCount - urlCount) <= Math.max(3, fromCount * 0.2)) score += 50
+
+      if (fromCount > 0 && urlCount > 0) {
+        let totalEpisodes = 0
+        let groupsWithMultiEpisodes = 0
+        for (let gi = 0; gi < Math.min(urlCount, 5); gi++) {
+          const epCount = countEpisodesInGroup(urlParts[gi])
+          totalEpisodes += epCount
+          if (epCount >= 2) groupsWithMultiEpisodes++
+        }
+        if (groupsWithMultiEpisodes > 0) score += groupsWithMultiEpisodes * 30
+        if (totalEpisodes >= 2) score += totalEpisodes * 2
+      }
+
+      if (fromLength > 0 && sep === '$$$') score += 10
+      else if (sep === '$$$') score += 3
+
+      if (score > bestScore) {
+        bestScore = score
+        bestSep = sep
+      }
+    }
+
+    return bestSep
+  }
+
+  const bestSep = findBestSeparator(playFrom, playUrl)
+  console.log(`[catvodParsePlayList] 选择线路组分隔符: "${bestSep}"`)
+
+  const sources = splitBySeparator(playFrom, bestSep)
+  const urls = splitBySeparator(playUrl, bestSep)
 
   console.log(`[catvodParsePlayList] 解析得到 ${sources.length} 个播放源名称, ${urls.length} 组播放地址`)
 
