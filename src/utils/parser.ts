@@ -1,7 +1,7 @@
 import type { Source, BookSource, IptvChannel, LiveChannel } from '@/types'
 import { safeJSONParse, generateId } from '.'
 
-function isSpiderApi(api: string): boolean {
+export function isSpiderApi(api: string): boolean {
   if (!api || typeof api !== 'string') return false
   return api.startsWith('csp_') ||
     api.startsWith('js_') ||
@@ -10,6 +10,28 @@ function isSpiderApi(api: string): boolean {
     api.startsWith('XBPQ_') ||
     api.startsWith('xbpq_') ||
     (!api.startsWith('http') && !api.startsWith('/') && /^[a-zA-Z]/.test(api) && !api.includes('.'))
+}
+
+export function isSpiderSource(source: any): boolean {
+  if (!source) return false
+  if (source.type === 4) return true
+  if (source.config?.isSpider) return true
+  if (source.api && isSpiderApi(source.api)) return true
+  if (source.url && source.url.includes('/api/tvbox/source/')) return true
+  if (source.url && source.url.includes('/api/spider-source/')) return true
+  if (source.url && source.url.includes('spider')) return true
+  return false
+}
+
+export function detectSpiderType(source: any): 'http' | 'js' | 'csp' | 'unknown' {
+  if (!source) return 'unknown'
+  const api = source.api || source.config?.spiderName || ''
+  if (api.startsWith('csp_')) return 'csp'
+  if (api.startsWith('js_')) return 'js'
+  if (source.type === 4 && source.api && source.api.startsWith('http')) return 'http'
+  if (source.url && source.url.includes('/api/tvbox/source/')) return 'http'
+  if (isSpiderApi(api)) return 'js'
+  return 'unknown'
 }
 
 function extractUrlFromExt(ext: any): string | null {

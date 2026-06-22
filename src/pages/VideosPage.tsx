@@ -311,7 +311,7 @@ export const VideosPage: React.FC = () => {
     const source = getSourceById(sourceId)
     const baseUrl = source?.url || ''
 
-    let playList = videoDetail ? catvodParsePlayList(videoDetail, source?.url) : []
+    let playList = videoDetail ? catvodParsePlayList(videoDetail, source) : []
     if (playList.length > 0 && baseUrl) {
       playList = playList.map(ps => ({
         name: ps.name,
@@ -356,7 +356,7 @@ export const VideosPage: React.FC = () => {
       }
     }
 
-    let playList = detail ? catvodParsePlayList(detail, source?.url) : []
+    let playList = detail ? catvodParsePlayList(detail, source) : []
 
     if (playList.length > 0 && baseUrl) {
       playList = playList.map(ps => ({
@@ -865,8 +865,8 @@ export const VideosPage: React.FC = () => {
                     <h4 className="text-sm font-medium text-black dark:text-white mb-3">播放源</h4>
                     {videoDetail ? (
                       <div className="space-y-3 max-h-60 overflow-y-auto scrollbar-ios">
-                        {catvodParsePlayList(videoDetail, getSourceById(detailModal.sourceId)?.url).length > 0 ? (
-                          catvodParsePlayList(videoDetail, getSourceById(detailModal.sourceId)?.url).map((src, idx) => (
+                        {catvodParsePlayList(videoDetail, getSourceById(detailModal.sourceId)).length > 0 ? (
+                          catvodParsePlayList(videoDetail, getSourceById(detailModal.sourceId)).map((src, idx) => (
                             <div key={idx} className="p-3 bg-ios-gray6 dark:bg-[#2C2C2E] rounded-ios">
                               <div className="flex items-center justify-between mb-2">
                                 <span className="font-medium text-sm">{src.name}</span>

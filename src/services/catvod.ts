@@ -1,6 +1,26 @@
 import { fetchJson, fetchUrl } from '@/utils/http'
 import { generateId, safeJSONParse } from '@/utils'
+import { isSpiderSource } from '@/utils/parser'
 import type { Source, Book, Video, Chapter, PlaySource, PlayUrl } from '@/types'
+
+function hasElectronSpider(): boolean {
+  return !!(window.electronAPI?.spider)
+}
+
+function getSpiderConfig(source: Source): { url: string; headers?: Record<string, string>; ext?: string; spiderName?: string } {
+  return {
+    url: source.url,
+    headers: source.config?.headers,
+    ext: source.config?.ext,
+    spiderName: source.config?.spiderName,
+  }
+}
+
+function isSpiderEngineSource(source: Source): boolean {
+  if (!source) return false
+  if (!hasElectronSpider()) return false
+  return isSpiderSource(source)
+}
 
 export interface CatVodCategory {
   type_id: string
@@ -240,6 +260,14 @@ function normalizePageInfo(data: any, page: number): { page: number; pagecount: 
 
 export async function catvodGetCategories(source: Source): Promise<CatVodCategory[]> {
   try {
+    if (isSpiderEngineSource(source)) {
+      const result = await window.electronAPI.spider.home(getSpiderConfig(source))
+      if (result.success && result.data?.categories) {
+        return result.data.categories
+      }
+      return []
+    }
+
     const urls = [
       buildApiUrl(source.url, { ac: 'list' }),
       buildApiUrl(source.url, { ac: 'type' }),
@@ -267,6 +295,30 @@ export async function catvodGetHomeContent(source: Source): Promise<{
   list: any[]
 }> {
   try {
+    if (isSpiderEngineSource(source)) {
+      const result = await window.electronAPI.spider.home(getSpiderConfig(source))
+      if (result.success && result.data) {
+        const list = result.data.list || []
+        const categories = result.data.categories || []
+        const videosFromList = list.filter(
+          (item: any) =>
+            item.vod_id || item.vod_name || item.id || item.name ||
+            source.type === 'video' || source.type === 'mixed'
+        )
+        const booksFromList = list.filter(
+          (item: any) =>
+            item.book_id || item.book_name || item.bookId || item.bookName || source.type === 'novel'
+        )
+        return {
+          categories,
+          videos: videosFromList,
+          books: booksFromList,
+          list,
+        }
+      }
+      return { categories: [], videos: [], books: [], list: [] }
+    }
+
     let data: any = null
     let list: any[] = []
     const tryUrls = [
@@ -323,6 +375,22 @@ export async function catvodGetCategoryContent(
   list: CatVodVideo[]
 }> {
   try {
+    if (isSpiderEngineSource(source)) {
+      const result = await window.electronAPI.spider.category(
+        getSpiderConfig(source),
+        categoryId,
+        page,
+        extend
+      )
+      if (result.success && result.data) {
+        const list = result.data.list || []
+        const raw = result.data.raw
+        const pageInfo = raw ? normalizePageInfo(raw, page) : { page, pagecount: 1, total: list.length, limit: 20 }
+        return { ...pageInfo, list }
+      }
+      return { page, pagecount: 1, total: 0, limit: 20, list: [] }
+    }
+
     const urls = [
       buildApiUrl(source.url, { ac: 'detail', t: categoryId, pg: page, ...extend }),
       buildApiUrl(source.url, { ac: 'list', t: categoryId, pg: page, ...extend }),
@@ -407,6 +475,15 @@ export async function catvodGetVideoDetail(
   vodId: string
 ): Promise<CatVodVideoDetail | null> {
   try {
+    if (isSpiderEngineSource(source)) {
+      const result = await window.electronAPI.spider.detail(getSpiderConfig(source), vodId)
+      if (result.success && result.data?.item) {
+        console.log(`[catvodGetVideoDetail] Spider引擎详情成功:`, JSON.stringify(result.data.item).slice(0, 1000))
+        return result.data.item
+      }
+      console.log(`[catvodGetVideoDetail] Spider引擎详情失败，尝试HTTP方式`)
+    }
+
     const isSpider = isSpiderApiUrl(source.url)
     const isOmniBox = isOmniBoxUrl(source.url)
 
@@ -540,6 +617,24 @@ export async function catvodGetPlayUrl(
       }
     }
 
+    if (isSpiderEngineSource(source)) {
+      const result = await window.electronAPI.spider.play(
+        getSpiderConfig(source),
+        playFlag || 'default',
+        playUrl
+      )
+      if (result.success && result.data?.url) {
+        const finalUrl = resolveUrl(result.data.url, source.url)
+        console.log(`[catvodGetPlayUrl] Spider引擎解析成功: ${finalUrl.slice(0, 200)}`)
+        return {
+          url: finalUrl,
+          parse: result.data.parse ?? 1,
+          header: result.data.header,
+        }
+      }
+      console.log(`[catvodGetPlayUrl] Spider引擎解析失败，尝试HTTP方式`)
+    }
+
     const isSpider = isSpiderApiUrl(source.url)
     const isOmniBox = isOmniBoxUrl(source.url)
 
@@ -671,6 +766,18 @@ export async function catvodSearch(
   page: number = 1
 ): Promise<CatVodVideo[]> {
   try {
+    if (isSpiderEngineSource(source)) {
+      const result = await window.electronAPI.spider.search(
+        getSpiderConfig(source),
+        keyword,
+        page
+      )
+      if (result.success && result.data?.list) {
+        return result.data.list
+      }
+      return []
+    }
+
     const urls = [
       buildApiUrl(source.url, { ac: 'detail', wd: keyword, pg: page }),
       buildApiUrl(source.url, { ac: 'list', wd: keyword, pg: page }),
@@ -776,7 +883,7 @@ export async function catvodGetChapterContent(
   }
 }
 
-export function catvodParsePlayList(detail: any, sourceUrl?: string): PlaySource[] {
+export function catvodParsePlayList(detail: any, sourceOrUrl?: string | Source): PlaySource[] {
   if (!detail || typeof detail !== 'object') {
     console.log('[catvodParsePlayList] detail为空或非对象，返回空数组')
     return []
@@ -834,7 +941,12 @@ export function catvodParsePlayList(detail: any, sourceUrl?: string): PlaySource
   console.log(`[catvodParsePlayList] playFrom="${String(playFrom).slice(0, 200)}"`)
   console.log(`[catvodParsePlayList] playUrl="${String(playUrl).slice(0, 300)}"`)
 
-  const isSpider = sourceUrl ? isSpiderApiUrl(sourceUrl) : false
+  const sourceUrl = typeof sourceOrUrl === 'string' ? sourceOrUrl : sourceOrUrl?.url
+  const sourceConfig = typeof sourceOrUrl === 'object' ? sourceOrUrl : null
+
+  const isSpider =
+    (sourceUrl && isSpiderApiUrl(sourceUrl)) ||
+    (sourceConfig && (sourceConfig.config?.isSpider || isSpiderSource(sourceConfig)))
 
   if (!playUrl && isSpider) {
     const vodId = detail.vod_id || detail.id || ''
